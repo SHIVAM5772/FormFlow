@@ -1,0 +1,15 @@
+node_modules/
+.npm-cache/
+dist/
+.env
+coverage/
+test-results/
+playwright-report/
+*.log
+*.xlsx
+!tests/fixtures/*.xlsx
+
+.next/
+.next-proxy-check/
+*.tsbuildinfo
+next-env.d.ts

@@ -1,0 +1,39 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Conditional section fixture</title>
+  </head>
+  <body>
+    <h1>Conditional sections</h1>
+    <form method="post" action="/submit">
+      <fieldset data-question-id="path">
+        <legend>Department</legend>
+        <label><input type="radio" name="path" value="Engineering" />Engineering</label
+        ><label><input type="radio" name="path" value="Operations" />Operations</label>
+      </fieldset>
+      <div data-question-id="engineer" hidden>
+        <label>Engineering ID <input name="engineer" disabled /></label>
+      </div>
+      <div data-question-id="operator" hidden>
+        <label>Operations ID <input name="operator" disabled /></label>
+      </div>
+      <button type="button" id="next">Next</button
+      ><button type="submit" id="submit" hidden>Submit</button>
+    </form>
+    <script>
+      document.getElementById('next').addEventListener('click', () => {
+        const choice = document.querySelector('input[name="path"]:checked');
+        if (!choice) return;
+        document.querySelector('[data-question-id="path"]').hidden = true;
+        const section = document.querySelector(
+          '[data-question-id="' + (choice.value === 'Engineering' ? 'engineer' : 'operator') + '"]',
+        );
+        section.hidden = false;
+        section.querySelector('input').disabled = false;
+        document.getElementById('next').hidden = true;
+        document.getElementById('submit').hidden = false;
+      });
+    </script>
+  </body>
+</html>

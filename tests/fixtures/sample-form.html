@@ -1,0 +1,71 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Local FormFlow fixture</title>
+  </head>
+  <body>
+    <h1>Employee registration</h1>
+    <form method="post" action="/submit">
+      <div data-question-id="name">
+        <label>Full name <input type="text" name="name" required /></label>
+      </div>
+      <div data-question-id="notes">
+        <label>Notes <textarea name="notes"></textarea></label>
+      </div>
+      <div data-question-id="team">
+        <label
+          >Team
+          <select name="team" required>
+            <option value="">Choose</option>
+            <option>Engineering</option>
+            <option>Operations</option>
+          </select></label
+        >
+      </div>
+      <fieldset data-question-id="choice">
+        <legend>Work style</legend>
+        <label><input type="radio" name="choice" value="Remote" required />Remote</label
+        ><label><input type="radio" name="choice" value="Office" />Office</label>
+      </fieldset>
+      <fieldset data-question-id="skills">
+        <legend>Skills</legend>
+        <label><input type="checkbox" name="skills" value="TypeScript" />TypeScript</label
+        ><label><input type="checkbox" name="skills" value="Excel" />Excel</label>
+      </fieldset>
+      <fieldset data-question-id="rating">
+        <legend>Rating</legend>
+        <label><input type="radio" name="rating" value="1" />1</label
+        ><label><input type="radio" name="rating" value="2" />2</label
+        ><label><input type="radio" name="rating" value="3" />3</label
+        ><label><input type="radio" name="rating" value="4" />4</label
+        ><label><input type="radio" name="rating" value="5" />5</label>
+      </fieldset>
+      <div data-question-id="date">
+        <label>Start date <input type="date" name="date" required /></label>
+      </div>
+      <div data-question-id="time">
+        <label>Start time <input type="time" name="time" required /></label>
+      </div>
+      <fieldset data-question-id="grid">
+        <legend>Availability</legend>
+        <div role="radiogroup" aria-label="Monday">
+          <label><input type="radio" name="Monday" value="Yes" />Yes</label
+          ><label><input type="radio" name="Monday" value="No" />No</label>
+        </div>
+        <div role="radiogroup" aria-label="Tuesday">
+          <label><input type="radio" name="Tuesday" value="Yes" />Yes</label
+          ><label><input type="radio" name="Tuesday" value="No" />No</label>
+        </div>
+      </fieldset>
+      <fieldset data-question-id="checks">
+        <legend>Preferences</legend>
+        <div role="row" aria-label="First">
+          <span>First</span><label><input type="checkbox" name="First" value="A" />A</label
+          ><label><input type="checkbox" name="First" value="B" />B</label>
+        </div>
+      </fieldset>
+      <button type="submit">Submit</button>
+    </form>
+  </body>
+</html>

@@ -1,0 +1,87 @@
+services:
+  migrate:
+    build: .
+    command: ['npm', 'run', 'db:deploy']
+    env_file: .env
+    environment:
+      DATABASE_URL: mysql://formflow:${MYSQL_PASSWORD}@mysql:3306/formflow
+    depends_on:
+      mysql: { condition: service_healthy }
+  api:
+    build: .
+    command: ['node', 'dist/apps/api/src/server.js']
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: mysql://formflow:${MYSQL_PASSWORD}@mysql:3306/formflow
+      REDIS_URL: redis://redis:6379
+    restart: unless-stopped
+    init: true
+    shm_size: 512mb
+    mem_limit: 1g
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:4000/api/health/ready').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+  worker:
+    build: .
+    command: ['node', 'dist/workers/submission-worker/src/index.js']
+    env_file: .env
+    environment:
+      NODE_ENV: production
+      DATABASE_URL: mysql://formflow:${MYSQL_PASSWORD}@mysql:3306/formflow
+      REDIS_URL: redis://redis:6379
+    restart: unless-stopped
+    init: true
+    shm_size: 1gb
+    mem_limit: 2g
+    cpus: 2
+    stop_grace_period: 120s
+    healthcheck:
+      test: ['CMD', 'node', 'scripts/worker-health.mjs']
+      start_period: 40s
+      interval: 15s
+      timeout: 10s
+      retries: 3
+    depends_on:
+      migrate: { condition: service_completed_successfully }
+      redis: { condition: service_healthy }
+  frontend:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web
+    restart: unless-stopped
+    init: true
+    healthcheck:
+      test:
+        [
+          'CMD',
+          'node',
+          '-e',
+          "fetch('http://127.0.0.1:3000').then(r=>process.exit(r.ok?0:1)).catch(()=>process.exit(1))",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+  proxy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports: ['80:80', '443:443']
+    environment:
+      DOMAIN: ${DOMAIN:?Set DOMAIN}
+    volumes:
+      ['./docker/Caddyfile:/etc/caddy/Caddyfile:ro', 'caddy-data:/data', 'caddy-config:/config']
+    depends_on: [api, frontend]
+volumes:
+  caddy-data:
+  caddy-config:
