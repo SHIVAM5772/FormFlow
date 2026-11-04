@@ -22,7 +22,8 @@ const values = {
   QUEUE_BACKEND: 'mongodb',
   PORT: '4000',
   WORKER_HEALTH_PORT: '4001',
-  MAX_UPLOAD_MB: process.env.MAX_UPLOAD_MB ?? '10',
+  // Leave room for multipart headers below Vercel's 4.5 MB request limit.
+  MAX_UPLOAD_MB: String(Math.min(4, Number(process.env.MAX_UPLOAD_MB ?? 4))),
   MAX_ROWS: process.env.MAX_ROWS ?? '2000',
   RECORD_DELAY_MS: process.env.RECORD_DELAY_MS ?? '3000',
   RETENTION_DAYS: process.env.RETENTION_DAYS ?? '30',

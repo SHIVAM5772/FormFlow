@@ -5,7 +5,7 @@
       "root": "apps/web",
       "framework": "nextjs",
       "installCommand": "cd ../.. && npm ci --include=dev",
-      "buildCommand": "cd ../.. && npm run build:web"
+      "buildCommand": "npm run build"
     },
     "api": {
       "root": ".",

@@ -17,7 +17,7 @@ The complete app runs in one Vercel project: Next.js frontend, a container API w
 | `WEB_ORIGIN`                 | Stable public HTTPS project hostname                       |
 | `PORT`                       | `4000` (API container port)                                |
 | `WORKER_HEALTH_PORT`         | `4001`                                                     |
-| `MAX_UPLOAD_MB` / `MAX_ROWS` | `10` / `2000`                                              |
+| `MAX_UPLOAD_MB` / `MAX_ROWS` | `4` / `2000`                                               |
 | `RECORD_DELAY_MS`            | `3000`                                                     |
 
 3. Ensure Atlas network access and database-user permissions allow connections from the deployed Vercel services. Atlas must support replica-set transactions.
