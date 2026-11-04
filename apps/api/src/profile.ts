@@ -148,7 +148,7 @@ async function issue(user: Actor, email: string, previous: EmailChangeVerificati
       data: { ready: true },
     });
     if (!delivered.count) throw new Error('Verification replaced');
-  } catch {
+  } catch (error) {
     await db.emailChangeVerification
       .updateMany({
         where: { userId: user.id, generation },
@@ -157,8 +157,12 @@ async function issue(user: Actor, email: string, previous: EmailChangeVerificati
       .catch(() => {});
     throw new ProfileError(
       503,
-      'Could not send the verification email. Try again after 60 seconds.',
-      'EMAIL_DELIVERY_FAILED',
+      error instanceof Error && error.name === 'SmtpIpBlockedError'
+        ? 'Email provider blocked this server. Ask the administrator to authorize its IP.'
+        : 'Could not send the verification email. Try again after 60 seconds.',
+      error instanceof Error && error.name === 'SmtpIpBlockedError'
+        ? 'SMTP_IP_BLOCKED'
+        : 'EMAIL_DELIVERY_FAILED',
     );
   }
   return verification({ userId: user.id, ...data });

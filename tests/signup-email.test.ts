@@ -35,6 +35,16 @@ it('requires host and sender configuration without silently pretending to send',
   await expect(sendSignupCode('test@example.com', '012345')).rejects.toThrow();
   expect(mail.send).not.toHaveBeenCalled();
 });
+it('maps an SMTP IP block to a safe error without exposing the provider response', async () => {
+  mail.send.mockRejectedValueOnce(
+    Object.assign(new Error('provider details'), { responseCode: 525 }),
+  );
+  await expect(sendEmailChangeCode('new@example.com', '012345')).rejects.toMatchObject({
+    name: 'SmtpIpBlockedError',
+    message: 'Email provider blocked this server. Ask the administrator to authorize its IP.',
+  });
+  expect(mail.close).toHaveBeenCalledOnce();
+});
 it('sends email-change OTPs with a purpose-specific message using the configured transport', async () => {
   await sendEmailChangeCode('new@example.com', '012345');
   expect(mail.send).toHaveBeenCalledWith(

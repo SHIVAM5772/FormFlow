@@ -126,7 +126,7 @@ async function issueCode(
       data: { ready: true },
     });
     if (!delivered.count) throw new Error('Verification changed during delivery');
-  } catch {
+  } catch (error) {
     await db.signupVerification
       .updateMany({
         where: { email, generation },
@@ -135,8 +135,12 @@ async function issueCode(
       .catch(() => {});
     throw new SignupError(
       503,
-      'Could not send the verification email. Please try again after 60 seconds.',
-      'EMAIL_DELIVERY_FAILED',
+      error instanceof Error && error.name === 'SmtpIpBlockedError'
+        ? 'Email provider blocked this server. Ask the administrator to authorize its IP.'
+        : 'Could not send the verification email. Please try again after 60 seconds.',
+      error instanceof Error && error.name === 'SmtpIpBlockedError'
+        ? 'SMTP_IP_BLOCKED'
+        : 'EMAIL_DELIVERY_FAILED',
     );
   }
   return {

@@ -1,5 +1,36 @@
 import nodemailer from 'nodemailer';
 import { z } from 'zod';
+import { readFileSync } from 'node:fs';
+import dotenv from 'dotenv';
+
+const mailKeys = [
+  'SMTP_HOST',
+  'SMTP_PORT',
+  'SMTP_SECURE',
+  'SMTP_USER',
+  'SMTP_PASSWORD',
+  'MAIL_FROM',
+] as const;
+
+function mailEnvironment() {
+  if (process.env.NODE_ENV === 'production' || process.env.NODE_ENV === 'test') return process.env;
+  // Local services may start from a workspace folder, or retain empty CLI env values.
+  // Read only mail defaults from the repository root; explicit nonempty env values win.
+  for (const relativeRoot of ['../../../', '../../../../']) {
+    try {
+      const root = new URL(relativeRoot, import.meta.url);
+      const manifest = JSON.parse(readFileSync(new URL('package.json', root), 'utf8'));
+      if (manifest.name !== 'formflow-automation-nextjs') continue;
+      const defaults = dotenv.parse(readFileSync(new URL('.env', root)));
+      return Object.fromEntries(
+        mailKeys.map((key) => [key, process.env[key]?.trim() ? process.env[key] : defaults[key]]),
+      );
+    } catch {
+      /* An absent local env file leaves normal validation in charge. */
+    }
+  }
+  return process.env;
+}
 
 export function signupMailConfig() {
   const result = z
@@ -15,7 +46,7 @@ export function signupMailConfig() {
         .min(1)
         .refine((value) => !/[\r\n]/.test(value)),
     })
-    .safeParse(process.env);
+    .safeParse(mailEnvironment());
   if (!result.success) throw new Error('Email delivery is not configured');
   const config = result.data;
   if (Boolean(config.SMTP_USER) !== Boolean(config.SMTP_PASSWORD))
@@ -59,6 +90,20 @@ async function sendCode(email: string, code: string, emailChange: boolean) {
       text: `Your FormFlow verification code is ${code}.\n\nThis code expires in 10 minutes. Do not share it with anyone.\n${emailChange ? 'This code confirms a change to your account email. If you did not request this change, ignore this email.' : 'If you did not request an account, you can ignore this email.'}`,
     });
     if (!info.accepted.length) throw new Error('Email was not accepted');
+  } catch (error) {
+    if (
+      typeof error === 'object' &&
+      error !== null &&
+      'responseCode' in error &&
+      error.responseCode === 525
+    ) {
+      const blocked = new Error(
+        'Email provider blocked this server. Ask the administrator to authorize its IP.',
+      );
+      blocked.name = 'SmtpIpBlockedError';
+      throw blocked;
+    }
+    throw error;
   } finally {
     transport.close();
   }
