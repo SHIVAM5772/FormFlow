@@ -7,6 +7,7 @@ export async function processBatch(
   publish: Progress,
   submit = submitResponse,
   ownsLease: () => Promise<boolean> = async () => true,
+  canStartRecord: () => boolean = () => true,
 ) {
   if (!(await ownsLease())) return;
   const job = await db.submissionJob.findUnique({
@@ -38,6 +39,8 @@ export async function processBatch(
   if (!claimed.count) return;
   const form = formSchema.parse(job.upload.template.schema.definition);
   while (true) {
+    // Finish between rows before a scheduled invocation reaches its deadline.
+    if (!canStartRecord()) break;
     if (!(await ownsLease())) return;
     const state = await db.submissionJob.findUnique({ where: { id: jobId } });
     if (state?.status !== 'RUNNING') break;

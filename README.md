@@ -1,53 +1,46 @@
 # FormFlow Automation
 
-Next.js 16 frontend, Express API, Prisma 6.19 + MongoDB, and a durable Playwright submission worker. Deploy the whole app in one Vercel project using Services and Daemons. The default MongoDB queue needs no Redis or separate backend host.
+Next.js frontend, Express API, Prisma + MongoDB Atlas, and Playwright submission processing. Local development and production use Vercel Services with native Node.js functions.
 
 ## Local setup
+
+Use Node.js 22 and run from the repository root:
 
 ```powershell
 npm.cmd ci
 npm.cmd run setup:env
-# Set DATABASE_URL to your MongoDB Atlas URL, including /formflow before ?.
+# Set DATABASE_URL in .env to your MongoDB Atlas URL, including /formflow.
 npm.cmd run db:generate
 npm.cmd run db:push
 npx.cmd playwright install chromium
 npm.cmd run user:create -- you@example.com
-npm.cmd run dev
+npm.cmd run dev:vercel
 ```
 
-Open http://localhost:3000. The existing `.env` URL is used without exposing it in client code. Keep SESSION_SECRET and DATA_KEY stable. Existing MySQL data is not automatically imported into MongoDB.
+Open the URL printed by Vercel. The local API service starts the API and MongoDB submission worker together. Local cron execution is unnecessary because the worker polls continuously. `npm run dev` also remains available for direct local development at http://localhost:3000.
 
-For a local database instead of Atlas: `docker compose up -d mongo mongo-init`, then use `mongodb://localhost:27017/formflow?replicaSet=rs0&directConnection=true`. A replica set is required for Prisma transactions. MongoDB uses `db push`, not SQL migrations. The old SQL migration directory is retained only as historical material.
+Keep SESSION_SECRET and DATA_KEY stable. MongoDB must support replica-set transactions; Atlas supplies this. Database credentials stay on the server. MongoDB uses db push rather than SQL migrations.
 
-## Vercel
+New users can choose **Sign up** on the sign-in screen or visit `/signup`. Enter an email and a password of at least 12 characters, then confirm the password. A successful signup signs the user into their own workspace. The account creation command remains available for administrators.
 
-See [SETUP_PRODUCTION.md](SETUP_PRODUCTION.md). Keep the Vercel project root at the repository root. `vercel.json` defines:
+## Production
 
-- `web`: Next.js frontend in `apps/web`.
-- `api`: container service with Chromium and Express.
-- `submissions`: continuously running container daemon, using the MongoDB queue.
+See [SETUP_PRODUCTION.md](SETUP_PRODUCTION.md). Keep the Vercel project root at the repository root. The frontend and native Express function share one hostname; /api/* routes to Express. Chromium is bundled through @sparticuz/chromium for Linux functions; local development uses Playwright's installed browser. Job pages poll persisted state every four seconds.
 
-All HTTP requests use the same public hostname. `/api/*` and `/socket.io/*` route to the API. The UI polls persisted job state every four seconds on job detail pages; optional Redis mode adds push updates.
+Submission processing uses an authenticated Vercel Cron endpoint and a renewable MongoDB lease. Each invocation starts new rows for up to three minutes, leaving time inside its five-minute function limit to finish. Remaining queued rows wait for the next invocation. Interrupted rows with uncertain browser results become UNKNOWN and are never automatically replayed.
+
+The checked-in schedule runs daily at 00:00 UTC (05:30 IST, subject to Hobby timing precision). On Pro/Enterprise, change the cron schedule to `* * * * *` for processing every minute. Daily processing can leave a large batch queued for multiple days. Use the Vercel Cron dashboard's Run action for an additional authenticated invocation.
 
 ## Commands
 
-| Command                                    | Purpose                                                       |
-| ------------------------------------------ | ------------------------------------------------------------- |
-| `npm run dev`                              | Frontend, API and worker                                      |
-| `npm run db:generate`                      | Generate the project-local Prisma client                      |
-| `npm run db:push`                          | Apply MongoDB collections and indexes without resetting data  |
-| `npm run user:create -- email@example.com` | Create an account with hidden password input                  |
-| `npm run build`                            | Compile API/worker and build Next.js                          |
-| `npm run typecheck` / `npm run lint`       | Static checks                                                 |
-| `npm test`                                 | Core, API and local-browser tests                             |
-| `npm run test:mongodb`                     | Real persistence/browser/lease tests in `formflow_codex_test` |
-| `npm run test:e2e`                         | Next.js UI tests                                              |
-| `npm run retention`                        | Remove expired records                                        |
+- `npm run dev:vercel`: frontend, API and local worker through Vercel.
+- `npm run dev`: direct local frontend, API and worker.
+- `npm run db:generate` / `npm run db:push`: generate Prisma and apply MongoDB indexes.
+- `npm run user:create -- you@example.com`: create an account with hidden password input.
+- `npm run typecheck`, `npm run lint`, `npm run build`: static and build checks.
+- `npm test`: core, API and local-browser tests.
+- `npm run test:mongodb`: isolated database integration tests.
+- `npm run test:e2e`: UI tests.
+- `npm run retention`: remove expired records.
 
-The generated Prisma client is ignored in Git and generated during the container build. `build:server` copies its runtime into `dist` for Node deployment.
-
-The worker uses an expiring MongoDB ownership lease so overlapping production releases do not process the same batch. It verifies ownership before submission intent. Interrupted browser results become UNKNOWN and cannot be automatically replayed. Queue entries are committed database records and survive web requests and container replacement.
-
-Set `QUEUE_BACKEND=redis` and `REDIS_URL` to keep using the optional BullMQ worker. The Vercel-only setup uses `QUEUE_BACKEND=mongodb`.
-
-Google OAuth is optional. CAPTCHA, login restrictions and unsupported form rules require manual action. Real responses are submitted only after explicit batch authorization. Automated tests submit only to the included local fixture.
+Google OAuth is optional. CAPTCHA, login restrictions and unsupported form rules require manual action. Responses are submitted only after explicit batch authorization. Tests use included local fixtures.

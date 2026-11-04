@@ -10,7 +10,7 @@
   ],
   "scripts": {
     "setup:env": "node scripts/init-env.mjs",
-    "dev": "concurrently -k -n api,worker,next \"tsx watch apps/api/src/server.ts\" \"tsx watch workers/submission-worker/src/index.ts\" \"next dev apps/web --hostname 127.0.0.1 --port 3000 --webpack\"",
+    "dev": "concurrently -k -n api,next \"tsx watch apps/api/src/server.ts\" \"next dev apps/web --hostname 127.0.0.1 --port 3000 --webpack\"",
     "dev:api": "tsx watch apps/api/src/server.ts",
     "dev:web": "next dev apps/web --hostname 127.0.0.1 --port 3000 --webpack",
     "worker": "tsx workers/submission-worker/src/index.ts",
@@ -31,11 +31,14 @@
     "test:mongodb": "node scripts/test-mongodb.mjs",
     "test:services:local": "node scripts/test-services-local.mjs",
     "verify:proxy": "node scripts/verify-next-proxy.mjs",
-    "start:web": "next start apps/web --hostname 127.0.0.1 --port 3000"
+    "start:web": "next start apps/web --hostname 127.0.0.1 --port 3000",
+    "dev:vercel": "node scripts/vercel-dev.mjs",
+    "dev:backend": "tsx watch apps/api/src/server.ts"
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
     "@prisma/client": "6.19.0",
+    "@sparticuz/chromium": "141.0.0",
     "@tanstack/react-query": "^5.90.0",
     "axios": "^1.12.0",
     "bcryptjs": "^3.0.2",
@@ -51,6 +54,7 @@
     "jose": "^6.1.0",
     "lucide-react": "^0.468.0",
     "multer": "^2.0.2",
+    "next": "16.4.4",
     "pino": "^9.14.0",
     "pino-http": "^10.5.0",
     "playwright": "1.56.1",
@@ -59,8 +63,7 @@
     "react-hook-form": "^7.63.0",
     "socket.io": "^4.8.1",
     "socket.io-client": "^4.8.1",
-    "zod": "^4.6.7",
-    "next": "16.4.4"
+    "zod": "^4.6.7"
   },
   "devDependencies": {
     "@eslint/js": "^9.36.0",

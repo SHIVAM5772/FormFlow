@@ -7,7 +7,6 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
-import { io } from 'socket.io-client';
 import {
   Activity,
   ArrowDownToLine,
@@ -164,11 +163,15 @@ export function FormFlowShell({ children }: { children: ReactNode }) {
   const [menu, setMenu] = useState(false);
   const client = useQueryClient();
   const pathname = usePathname();
+  const router = useRouter();
   const me = useQuery({
     queryKey: ['me'],
     queryFn: () => get<{ id: string; email: string }>('/auth/me'),
     retry: false,
   });
+  useEffect(() => {
+    if (me.data && pathname === '/signup') router.replace('/');
+  }, [me.data, pathname, router]);
   useEffect(() => {
     if (!themeReady) return;
     document.documentElement.classList.toggle('dark', dark);
@@ -182,19 +185,6 @@ export function FormFlowShell({ children }: { children: ReactNode }) {
   useEffect(() => {
     setMenu(false);
   }, [pathname]);
-  useEffect(() => {
-    if (!me.data) return;
-    const socket = io({ withCredentials: true, transports: ['polling'] });
-    socket.on('job:updated', () => {
-      void client.invalidateQueries({ queryKey: ['jobs'] });
-      void client.invalidateQueries({ queryKey: ['job'] });
-      void client.invalidateQueries({ queryKey: ['records'] });
-      void client.invalidateQueries({ queryKey: ['stats'] });
-    });
-    return () => {
-      socket.disconnect();
-    };
-  }, [me.data, client]);
   if (me.isPending)
     return (
       <div className="boot">
@@ -205,7 +195,7 @@ export function FormFlowShell({ children }: { children: ReactNode }) {
   return (
     <ToastContext.Provider value={setToast}>
       {!me.data ? (
-        <Login />
+        <Login key={pathname === '/signup' ? 'signup' : 'login'} signup={pathname === '/signup'} />
       ) : (
         <div className="app-shell">
           {menu && (
@@ -314,15 +304,31 @@ export function FormFlowShell({ children }: { children: ReactNode }) {
     </ToastContext.Provider>
   );
 }
-const loginSchema = z.object({
-  email: z.string().email('Enter your email address'),
-  password: z.string().min(1, 'Enter your password'),
-});
-function Login() {
+function Login({ signup = false }: { signup?: boolean }) {
   const client = useQueryClient();
-  const form = useForm<z.infer<typeof loginSchema>>({ resolver: zodResolver(loginSchema) });
+  const schema = z
+    .object({
+      email: z.string().trim().email('Enter your email address').max(191),
+      password: signup
+        ? z
+            .string()
+            .min(12, 'Use at least 12 characters')
+            .max(72, 'Use a shorter password')
+            .refine(
+              (value) => new TextEncoder().encode(value).length <= 72,
+              'Use a shorter password (maximum 72 UTF-8 bytes)',
+            )
+        : z.string().min(1, 'Enter your password'),
+      confirmPassword: z.string().optional(),
+    })
+    .refine((value) => !signup || value.password === value.confirmPassword, {
+      message: 'Passwords do not match',
+      path: ['confirmPassword'],
+    });
+  const form = useForm<z.infer<typeof schema>>({ resolver: zodResolver(schema) });
   const mutation = useMutation({
-    mutationFn: (body: z.infer<typeof loginSchema>) => api.post('/auth/login', body),
+    mutationFn: ({ email, password }: z.infer<typeof schema>) =>
+      api.post(signup ? '/auth/signup' : '/auth/login', { email, password }),
     onSuccess: () => client.invalidateQueries({ queryKey: ['me'] }),
   });
   return (
@@ -358,8 +364,12 @@ function Login() {
       <div className="login-panel">
         <div className="login-card">
           <div className="eyebrow">YOUR WORKSPACE</div>
-          <h1>Welcome back</h1>
-          <p>Sign in to manage your form workflows.</p>
+          <h1>{signup ? 'Create your account' : 'Welcome back'}</h1>
+          <p>
+            {signup
+              ? 'Start your own workspace for form workflows.'
+              : 'Sign in to manage your form workflows.'}
+          </p>
           <form onSubmit={form.handleSubmit((body) => mutation.mutate(body))}>
             <label htmlFor="email">Email address</label>
             <input id="email" type="email" autoComplete="username" {...form.register('email')} />
@@ -370,11 +380,31 @@ function Login() {
             <input
               id="password"
               type="password"
-              autoComplete="current-password"
+              autoComplete={signup ? 'new-password' : 'current-password'}
+              aria-describedby={signup ? 'password-help' : undefined}
               {...form.register('password')}
             />
             {form.formState.errors.password && (
               <p className="field-error">{form.formState.errors.password.message}</p>
+            )}
+            {signup && (
+              <>
+                <p id="password-help" className="auth-hint">
+                  Use at least 12 characters.
+                </p>
+                <label htmlFor="confirm-password">Confirm password</label>
+                <input
+                  id="confirm-password"
+                  type="password"
+                  autoComplete="new-password"
+                  {...form.register('confirmPassword')}
+                />
+                {form.formState.errors.confirmPassword && (
+                  <p className="field-error" role="alert">
+                    {form.formState.errors.confirmPassword.message}
+                  </p>
+                )}
+              </>
             )}
             {mutation.isError && <ErrorBox error={mutation.error} />}
             <button className="btn" disabled={mutation.isPending}>
@@ -383,13 +413,19 @@ function Login() {
               ) : (
                 <ArrowRight size={18} />
               )}
-              Sign in
+              {mutation.isPending
+                ? signup
+                  ? 'Creating account…'
+                  : 'Signing in…'
+                : signup
+                  ? 'Create account'
+                  : 'Sign in'}
             </button>
           </form>
-          <p className="small-note">
-            First time here? Your administrator creates workspace accounts with the setup command in
-            the README.
-          </p>
+          <p className="small-note">{signup ? 'Already have an account?' : 'New to FormFlow?'}</p>
+          <Link className="btn secondary auth-switch" href={signup ? '/' : '/signup'}>
+            {signup ? 'Sign in' : 'Sign up'}
+          </Link>
         </div>
       </div>
     </div>

@@ -4,8 +4,11 @@ import { sampleForm, sampleAnswers } from './helpers.js';
 import { columns } from '../packages/shared/src/index.js';
 import { generateTemplate } from '../packages/excel-engine/src/index.js';
 import ExcelJS from 'exceljs';
+import bcrypt from 'bcryptjs';
+import { Prisma } from '../packages/database/generated/client/index.js';
 const mocks = vi.hoisted(() => ({
   findUnique: vi.fn(),
+  createUser: vi.fn(),
   findFirst: vi.fn(),
   count: vi.fn(),
   audit: vi.fn(),
@@ -22,7 +25,7 @@ const mocks = vi.hoisted(() => ({
 }));
 vi.mock('../packages/database/src/index.js', () => ({
   db: {
-    user: { findUnique: mocks.findUnique },
+    user: { findUnique: mocks.findUnique, create: mocks.createUser },
     form: { findFirst: mocks.findFirst },
     auditLog: { create: mocks.audit },
     $runCommandRaw: mocks.raw,
@@ -68,6 +71,70 @@ beforeEach(() => {
     email: 'test@example.com',
     sessionVersion: 0,
   });
+  mocks.createUser.mockResolvedValue({
+    id: '7926ad27-2a8b-487a-adf1-010723b037a3',
+    email: 'test@example.com',
+    sessionVersion: 0,
+  });
+});
+it('creates a normalized account with a hashed password and an authenticated session', async () => {
+  const password = 'a-long-test-password';
+  const res = await request
+    .post('/api/auth/signup')
+    .set('Origin', 'http://localhost:3000')
+    .send({ email: '  TEST@Example.com  ', password });
+  expect(res.status).toBe(201);
+  const stored = mocks.createUser.mock.calls[0][0].data;
+  expect(stored.email).toBe('test@example.com');
+  expect(stored.passwordHash).not.toBe(password);
+  expect(await bcrypt.compare(password, stored.passwordHash)).toBe(true);
+  expect(res.body.data).toEqual({
+    id: '7926ad27-2a8b-487a-adf1-010723b037a3',
+    email: 'test@example.com',
+  });
+  expect(JSON.stringify(res.body)).not.toContain('password');
+  const cookie = res.headers['set-cookie'][0];
+  expect(cookie).toContain('HttpOnly');
+  expect(cookie).toContain('SameSite=Lax');
+  expect((await request.get('/api/auth/me').set('Cookie', cookie)).status).toBe(200);
+});
+it.each([
+  { email: 'invalid', password: 'a-long-test-password' },
+  { email: 'test@example.com', password: 'short' },
+  { email: 'test@example.com', password: '🙂'.repeat(19) },
+])(
+  'rejects invalid signup credentials without creating an account: $email / $password',
+  async (body) => {
+    const res = await request
+      .post('/api/auth/signup')
+      .set('Origin', 'http://localhost:3000')
+      .send(body);
+    expect(res.status).toBe(400);
+    expect(mocks.createUser).not.toHaveBeenCalled();
+  },
+);
+it('handles concurrent duplicate email creation without overwriting the existing account', async () => {
+  mocks.createUser.mockRejectedValueOnce(
+    new Prisma.PrismaClientKnownRequestError('Duplicate', {
+      code: 'P2002',
+      clientVersion: '6.19.0',
+    }),
+  );
+  const res = await request
+    .post('/api/auth/signup')
+    .set('Origin', 'http://localhost:3000')
+    .send({ email: 'test@example.com', password: 'a-long-test-password' });
+  expect(res.status).toBe(409);
+  expect(res.body.error.code).toBe('EMAIL_EXISTS');
+  expect(res.headers['set-cookie']).toBeUndefined();
+});
+it('rejects signup from another origin before creating an account', async () => {
+  const res = await request
+    .post('/api/auth/signup')
+    .set('Origin', 'https://evil.test')
+    .send({ email: 'test@example.com', password: 'a-long-test-password' });
+  expect(res.status).toBe(403);
+  expect(mocks.createUser).not.toHaveBeenCalled();
 });
 it('exposes liveness without authentication', async () => {
   const res = await request.get('/api/health');

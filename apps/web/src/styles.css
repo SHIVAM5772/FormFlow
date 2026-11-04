@@ -1233,6 +1233,15 @@ dd {
   margin-top: 27px;
   line-height: 1.8;
 }
+.login-card .auth-switch {
+  width: 100%;
+  margin-top: 10px;
+}
+.auth-hint {
+  color: var(--muted);
+  font-size: 12px;
+  margin: 8px 0 16px;
+}
 .scrim {
   display: none;
 }

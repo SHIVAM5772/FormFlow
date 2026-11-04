@@ -1,5 +1,5 @@
 module.exports = {
-  content: ['./apps/web/app/**/*.{ts,tsx}', './apps/web/src/**/*.{ts,tsx}'],
+  content: { relative: true, files: ['./app/**/*.{ts,tsx}', './src/**/*.{ts,tsx}'] },
   darkMode: 'class',
   theme: { extend: {} },
   plugins: [],

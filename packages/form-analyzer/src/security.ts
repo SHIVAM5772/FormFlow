@@ -89,6 +89,14 @@ export async function secureContext(context: BrowserContext, fixtureOrigin?: str
   });
 }
 export async function openBrowser() {
+  if (process.env.VERCEL && process.platform === 'linux') {
+    const { default: serverless } = await import('@sparticuz/chromium');
+    return chromium.launch({
+      headless: true,
+      args: serverless.args,
+      executablePath: await serverless.executablePath(),
+    });
+  }
   return chromium.launch({
     headless: true,
     ...(process.env.PLAYWRIGHT_EXECUTABLE_PATH

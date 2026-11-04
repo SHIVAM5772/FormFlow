@@ -11,10 +11,16 @@ let cookie = '';
 async function request(path, options = {}) {
   const response = await fetch(new URL(path, origin), {
     ...options,
-    headers: { Origin: origin.origin, ...(cookie ? { Cookie: cookie } : {}), ...options.headers },
+    headers: {
+      Origin: origin.origin,
+      Connection: 'close',
+      ...(cookie ? { Cookie: cookie } : {}),
+      ...options.headers,
+    },
     signal: AbortSignal.timeout(60000),
   });
   if (!response.ok) throw new Error(`${path}: HTTP ${response.status}`);
+  await response.arrayBuffer();
   console.log(`PASS ${path}: HTTP ${response.status}`);
   return response;
 }

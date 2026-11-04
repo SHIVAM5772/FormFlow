@@ -6,7 +6,6 @@ if (!['http:', 'https:'].includes(api.protocol))
   throw new Error('API_PROXY_URL must be HTTP or HTTPS');
 export default {
   distDir: process.env.NEXT_DIST_DIR || '.next',
-  output: 'standalone',
   outputFileTracingRoot: fileURLToPath(new URL('../..', import.meta.url)),
   devIndicators: false,
   experimental: { proxyClientMaxBodySize: '26mb', cpus: 2 },

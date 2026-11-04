@@ -9,6 +9,6 @@ Run `npm run db:generate` after installing dependencies. Install Chromium with `
 
 `npm run test:services` requires DATABASE_URL ending in `_test`. MongoDB must run as a replica set. With QUEUE_BACKEND=redis, REDIS_URL must also target isolated database `/15`; this enables the optional real BullMQ/Redis test. MongoDB mode skips only that Redis-specific test.
 
-The GitHub workflow starts a disposable MongoDB replica set and runs the MongoDB-mode suite. A checked-in workflow is not proof of a successful remote CI run.
+Run these checks locally before deploying.
 
 `npm run verify:proxy` is a separate local smoke test for Next.js API/Socket.IO rewrites; it requires normal local API configuration. Vercel uses the top-level Services route table instead of the local Next.js rewrites.

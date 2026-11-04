@@ -89,6 +89,20 @@ beforeEach(() => {
   process.env.RECORD_DELAY_MS = '1000';
 });
 const publish = async () => {};
+it('leaves queued records untouched when the scheduled run has no time for another row', async () => {
+  const submit = vi.fn();
+  await processBatch(
+    'batch',
+    publish,
+    submit,
+    async () => true,
+    () => false,
+  );
+  expect(submit).not.toHaveBeenCalled();
+  expect(storage.records.every((record) => record.status === 'QUEUED')).toBe(true);
+  expect(storage.attempts).toHaveLength(0);
+  expect(storage.job.status).toBe('RUNNING');
+});
 it('does not recover or submit records when the worker does not own its lease', async () => {
   storage.records[0].status = 'RUNNING';
   const submit = vi.fn();

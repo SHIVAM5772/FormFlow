@@ -4,7 +4,7 @@ let env = await readFile(new URL('../.env.example', import.meta.url), 'utf8');
 env = env
   .replace('replace-with-at-least-32-random-characters', randomBytes(32).toString('hex'))
   .replace('replace-with-64-hex-characters', randomBytes(32).toString('hex'))
-  .replace('change-this-root-password', randomBytes(24).toString('hex'));
+  .replace('CRON_SECRET=', `CRON_SECRET=${randomBytes(32).toString('hex')}`);
 try {
   await writeFile(new URL('../.env', import.meta.url), env, { flag: 'wx' });
   console.log(

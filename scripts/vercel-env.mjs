@@ -10,7 +10,7 @@ await access(new URL('../.vercel/project.json', import.meta.url));
 const cliEntry = process.env.VERCEL_CLI_ENTRY;
 if (!cliEntry)
   throw new Error('Set VERCEL_CLI_ENTRY to the installed Vercel CLI JavaScript entrypoint.');
-for (const name of ['DATABASE_URL', 'SESSION_SECRET', 'DATA_KEY']) {
+for (const name of ['DATABASE_URL', 'SESSION_SECRET', 'DATA_KEY', 'CRON_SECRET']) {
   if (!process.env[name]) throw new Error(`Missing ${name} in .env`);
 }
 const values = {
@@ -18,10 +18,9 @@ const values = {
   DATABASE_URL: process.env.DATABASE_URL,
   SESSION_SECRET: process.env.SESSION_SECRET,
   DATA_KEY: process.env.DATA_KEY,
+  CRON_SECRET: process.env.CRON_SECRET,
   WEB_ORIGIN: origin.origin,
   QUEUE_BACKEND: 'mongodb',
-  PORT: '4000',
-  WORKER_HEALTH_PORT: '4001',
   // Leave room for multipart headers below Vercel's 4.5 MB request limit.
   MAX_UPLOAD_MB: String(Math.min(4, Number(process.env.MAX_UPLOAD_MB ?? 4))),
   MAX_ROWS: process.env.MAX_ROWS ?? '2000',
@@ -35,7 +34,13 @@ if (process.env.GOOGLE_CLIENT_ID && process.env.GOOGLE_CLIENT_SECRET) {
     GOOGLE_REDIRECT_URI: `${origin.origin}/api/google/callback`,
   });
 }
-const secrets = new Set(['DATABASE_URL', 'SESSION_SECRET', 'DATA_KEY', 'GOOGLE_CLIENT_SECRET']);
+const secrets = new Set([
+  'DATABASE_URL',
+  'SESSION_SECRET',
+  'DATA_KEY',
+  'CRON_SECRET',
+  'GOOGLE_CLIENT_SECRET',
+]);
 for (const [name, value] of Object.entries(values)) {
   const result = spawnSync(
     process.execPath,

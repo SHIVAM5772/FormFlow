@@ -141,6 +141,48 @@ export function createApp() {
   );
   app.use('/api', sameOrigin);
   app.post(
+    '/api/auth/signup',
+    rateLimit({ windowMs: 900000, limit: 10, standardHeaders: 'draft-7', legacyHeaders: false }),
+    asyncRoute(async (req, res) => {
+      const body = z
+        .object({
+          email: z
+            .string()
+            .trim()
+            .email()
+            .max(191)
+            .transform((value) => value.toLowerCase()),
+          password: z
+            .string()
+            .min(12)
+            .max(72)
+            .refine(
+              (value) => Buffer.byteLength(value, 'utf8') <= 72,
+              'Password must fit within 72 UTF-8 bytes',
+            ),
+        })
+        .parse(req.body);
+      let user;
+      try {
+        user = await db.user.create({
+          data: { email: body.email, passwordHash: await bcrypt.hash(body.password, 12) },
+        });
+      } catch (error) {
+        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')
+          throw new HttpError(
+            409,
+            'An account with this email already exists. Please sign in.',
+            'EMAIL_EXISTS',
+          );
+        throw error;
+      }
+      await audit(user.id, 'SIGNUP');
+      const token = await signSession(user.id, user.sessionVersion);
+      res.cookie('session', token, { ...cookieOptions, maxAge: 8 * 3600000 });
+      res.status(201).json({ data: { id: user.id, email: user.email } });
+    }),
+  );
+  app.post(
     '/api/auth/login',
     rateLimit({ windowMs: 900000, limit: 10, standardHeaders: 'draft-7', legacyHeaders: false }),
     asyncRoute(async (req, res) => {

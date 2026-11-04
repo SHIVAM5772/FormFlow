@@ -27,7 +27,7 @@ export function submissionQueue() {
   return queue;
 }
 export async function dispatch(id: string) {
-  // The persisted SubmissionJob is the queue entry; the daemon polls MongoDB.
+  // The persisted SubmissionJob is consumed by the local or scheduled worker.
   if (usesMongoQueue()) return;
   const q = submissionQueue();
   const previous = await q.getJob(id);
