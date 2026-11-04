@@ -1,0 +1,37 @@
+{
+  "$schema": "https://openapi.vercel.sh/vercel.json",
+  "services": {
+    "web": {
+      "root": "apps/web",
+      "framework": "nextjs",
+      "installCommand": "cd ../.. && npm ci --include=dev",
+      "buildCommand": "cd ../.. && npm run build:web"
+    },
+    "api": {
+      "root": ".",
+      "runtime": "container",
+      "entrypoint": "Dockerfile",
+      "command": ["node", "dist/apps/api/src/server.js"]
+    }
+  },
+  "daemons": {
+    "submissions": {
+      "root": ".",
+      "entrypoint": "Dockerfile",
+      "command": ["node", "dist/workers/submission-worker/src/index.js"],
+      "instances": { "iad1": 1 },
+      "resources": { "requests": { "memory": "2Gi" } },
+      "terminationGracePeriodSeconds": 120,
+      "livenessProbe": {
+        "httpGet": { "port": 4001, "path": "/health" },
+        "initialDelaySeconds": 30,
+        "timeoutSeconds": 5
+      }
+    }
+  },
+  "rewrites": [
+    { "source": "/api/:path*", "destination": { "service": "api" } },
+    { "source": "/socket.io/:path*", "destination": { "service": "api" } },
+    { "source": "/:path*", "destination": { "service": "web" } }
+  ]
+}

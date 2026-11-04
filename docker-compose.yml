@@ -1,22 +1,27 @@
 name: ${COMPOSE_PROJECT_NAME:-formflow}
 services:
-  mysql:
-    image: mysql:8.4
+  mongo:
+    image: mongo:8.0
+    command: ['mongod', '--replSet', 'rs0', '--bind_ip_all']
     restart: unless-stopped
-    environment:
-      MYSQL_DATABASE: formflow
-      MYSQL_USER: formflow
-      MYSQL_PASSWORD: ${MYSQL_PASSWORD:-formflow_local}
-      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD:?Set MYSQL_ROOT_PASSWORD in .env}
-    ports: ['127.0.0.1:${MYSQL_PORT:-3306}:3306']
-    volumes: ['mysql-data:/var/lib/mysql']
+    ports: ['127.0.0.1:27017:27017']
+    volumes: ['mongo-data:/data/db']
     healthcheck:
-      test: ['CMD-SHELL', 'mysqladmin ping -h localhost -uroot -p$$MYSQL_ROOT_PASSWORD --silent']
-      interval: 10s
+      test: ['CMD', 'mongosh', '--quiet', '--eval', 'db.adminCommand({ping:1}).ok']
+      interval: 5s
       timeout: 5s
       retries: 20
+  mongo-init:
+    image: mongo:8.0
+    depends_on:
+      mongo: { condition: service_healthy }
+    restart: 'no'
+    entrypoint: ['mongosh', '--host', 'mongo:27017', '--quiet', '--eval']
+    command:
+      - 'try { rs.status() } catch (e) { rs.initiate({_id:"rs0",members:[{_id:0,host:"mongo:27017"}]}) }; while (!db.hello().isWritablePrimary) { sleep(500) }'
   redis:
     image: redis:7.4-alpine
+    profiles: ['redis']
     command: ['redis-server', '--appendonly', 'yes', '--maxmemory-policy', 'noeviction']
     restart: unless-stopped
     ports: ['127.0.0.1:6379:6379']
@@ -27,5 +32,5 @@ services:
       timeout: 3s
       retries: 10
 volumes:
-  mysql-data:
+  mongo-data:
   redis-data:

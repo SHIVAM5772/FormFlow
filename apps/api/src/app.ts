@@ -7,7 +7,7 @@ import multer from 'multer';
 import bcrypt from 'bcryptjs';
 import { createHash } from 'node:crypto';
 import { z, ZodError } from 'zod';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../../../packages/database/generated/client/index.js';
 import pino from 'pino';
 import { pinoHttp } from 'pino-http';
 import { db, encrypt, decrypt } from '../../../packages/database/src/index.js';
@@ -23,7 +23,11 @@ import {
   type ValidationResult,
   type RecordState,
 } from '../../../packages/shared/src/index.js';
-import { dispatch, redisConnection } from '../../../packages/submission-engine/src/queue.js';
+import {
+  dispatch,
+  redisConnection,
+  usesMongoQueue,
+} from '../../../packages/submission-engine/src/queue.js';
 import { config, webOrigins } from './config.js';
 import { cookieOptions, requireAuth, sameOrigin, signSession } from './auth.js';
 import { google, googleAccess } from './google.js';
@@ -114,11 +118,11 @@ export function createApp() {
   app.get(
     '/api/health/ready',
     asyncRoute(async (_req, res) => {
-      const redis = redisConnection();
+      const redis = usesMongoQueue() ? undefined : redisConnection();
       let timer: ReturnType<typeof setTimeout> | undefined;
       try {
         await Promise.race([
-          Promise.all([db.$queryRaw`SELECT 1`, redis.ping()]),
+          Promise.all([db.$runCommandRaw({ ping: 1 }), redis?.ping()]),
           new Promise((_, reject) => {
             timer = setTimeout(
               () => reject(new HttpError(503, 'Database or queue is unavailable', 'NOT_READY')),
@@ -131,7 +135,7 @@ export function createApp() {
         throw new HttpError(503, 'Database or queue is unavailable', 'NOT_READY');
       } finally {
         if (timer) clearTimeout(timer);
-        redis.disconnect();
+        redis?.disconnect();
       }
     }),
   );
@@ -194,41 +198,38 @@ export function createApp() {
       } finally {
         analyzing--;
       }
-      const saved = await db.$transaction(
-        async (tx) => {
-          let form = await tx.form.findFirst({
-            where: { userId: uid(res), sourceUrl: definition.sourceUrl },
-            include: { schemas: { orderBy: { version: 'desc' }, take: 1 } },
+      const saved = await db.$transaction(async (tx) => {
+        let form = await tx.form.findFirst({
+          where: { userId: uid(res), sourceUrl: definition.sourceUrl },
+          include: { schemas: { orderBy: { version: 'desc' }, take: 1 } },
+        });
+        if (form?.schemas[0]?.fingerprint === definition.fingerprint) return form;
+        if (!form) {
+          const created = await tx.form.create({
+            data: { userId: uid(res), title: definition.title, sourceUrl: definition.sourceUrl },
           });
-          if (form?.schemas[0]?.fingerprint === definition.fingerprint) return form;
-          if (!form) {
-            const created = await tx.form.create({
-              data: { userId: uid(res), title: definition.title, sourceUrl: definition.sourceUrl },
-            });
-            form = { ...created, schemas: [] };
-          }
-          await tx.form.update({ where: { id: form.id }, data: { title: definition.title } });
-          await tx.formSchema.create({
-            data: {
-              formId: form.id,
-              version: (form.schemas[0]?.version ?? 0) + 1,
-              definition: json(definition),
-              fingerprint: definition.fingerprint,
-              questions: {
-                create: definition.questions.map((q) => ({
-                  externalId: q.id,
-                  title: q.title,
-                  type: q.type,
-                  required: q.required,
-                  metadata: json(q),
-                })),
-              },
+          form = { ...created, schemas: [] };
+        }
+        await tx.form.update({ where: { id: form.id }, data: { title: definition.title } });
+        await tx.formSchema.create({
+          data: {
+            formId: form.id,
+            version: (form.schemas[0]?.version ?? 0) + 1,
+            definition: json(definition),
+            fingerprint: definition.fingerprint,
+            questions: {
+              create: definition.questions.map((q) => ({
+                externalId: q.id,
+                title: q.title,
+                type: q.type,
+                required: q.required,
+                metadata: json(q),
+              })),
             },
-          });
-          return form;
-        },
-        { isolationLevel: 'Serializable' },
-      );
+          },
+        });
+        return form;
+      });
       await audit(uid(res), 'FORM_ANALYZED', saved.id);
       res.json({ data: await ownedForm(saved.id, uid(res)) });
     }),
@@ -430,6 +431,7 @@ export function createApp() {
               create: rows.map((r) => ({
                 rowNumber: r.rowNumber,
                 encryptedAnswers: encrypt(r.answers),
+                submitIntentAt: null,
               })),
             },
           },
@@ -526,7 +528,7 @@ export function createApp() {
           where: {
             id: record.id,
             status: record.status,
-            submitIntentAt: null,
+            OR: [{ submitIntentAt: null }, { submitIntentAt: { isSet: false } }],
             error: record.error,
             job: { status: { in: ['COMPLETED', 'PAUSED'] } },
           },

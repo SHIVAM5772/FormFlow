@@ -3,6 +3,7 @@ export default tseslint.config(
   {
     ignores: [
       'node_modules/**',
+      'packages/database/generated/**',
       '**/.next/**',
       '**/.next-proxy-check/**',
       '**/next-env.d.ts',

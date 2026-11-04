@@ -9,6 +9,7 @@ export const config = z
     SESSION_SECRET: z.string().min(32),
     DATA_KEY: z.string().regex(/^[a-f0-9]{64}$/i),
     DATABASE_URL: z.string().min(1),
+    QUEUE_BACKEND: z.enum(['mongodb', 'redis']).default('mongodb'),
     MAX_UPLOAD_MB: z.coerce.number().min(1).max(25).default(10),
     MAX_ROWS: z.coerce.number().min(1).max(10000).default(2000),
   })

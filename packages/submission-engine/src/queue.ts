@@ -2,6 +2,9 @@ import 'dotenv/config';
 import { Queue } from 'bullmq';
 import { Redis } from 'ioredis';
 export const QUEUE = 'formflow-submissions';
+export function usesMongoQueue() {
+  return (process.env.QUEUE_BACKEND ?? 'mongodb') === 'mongodb';
+}
 export function redisConnection() {
   const client = new Redis(process.env.REDIS_URL ?? 'redis://localhost:6379', {
     maxRetriesPerRequest: null,
@@ -24,6 +27,8 @@ export function submissionQueue() {
   return queue;
 }
 export async function dispatch(id: string) {
+  // The persisted SubmissionJob is the queue entry; the daemon polls MongoDB.
+  if (usesMongoQueue()) return;
   const q = submissionQueue();
   const previous = await q.getJob(id);
   if (previous && (await previous.isFailed())) await previous.remove();

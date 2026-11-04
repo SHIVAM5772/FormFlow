@@ -9,8 +9,10 @@ export default {
   output: 'standalone',
   outputFileTracingRoot: fileURLToPath(new URL('../..', import.meta.url)),
   devIndicators: false,
-  experimental: { proxyClientMaxBodySize: '26mb' },
+  experimental: { proxyClientMaxBodySize: '26mb', cpus: 2 },
   async rewrites() {
+    // Public API routes are owned by the Vercel service route table.
+    if (process.env.VERCEL) return [];
     return [
       { source: '/api/:path*', destination: api.origin + '/api/:path*' },
       { source: '/socket.io', destination: api.origin + '/socket.io/' },

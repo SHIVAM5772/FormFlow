@@ -4,7 +4,7 @@ import { db } from '../packages/database/src/index.js';
 import { z } from 'zod';
 import { createInterface } from 'node:readline/promises';
 import { Writable } from 'node:stream';
-import { Prisma } from '@prisma/client';
+import { Prisma } from '../packages/database/generated/client/index.js';
 
 // Password is read from stdin, never from command-line arguments or logged.
 const email = z.string().email().max(191).safeParse(process.argv[2]?.trim().toLowerCase());
@@ -52,7 +52,7 @@ try {
     );
   } else if (error instanceof Prisma.PrismaClientInitializationError) {
     console.error(
-      'Cannot connect to MySQL. Start Docker services and apply database migrations first.',
+      'Cannot connect to MongoDB. Check DATABASE_URL, Atlas network access and run npm run db:push first.',
     );
   } else if (error instanceof Error && 'code' in error && error.code === 'ERR_USE_AFTER_CLOSE') {
     console.error('Password input was closed. Run the command again in an interactive PowerShell.');

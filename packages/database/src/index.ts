@@ -1,7 +1,13 @@
 import 'dotenv/config';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../generated/client/index.js';
 import { createCipheriv, createDecipheriv, randomBytes } from 'node:crypto';
-export const db = new PrismaClient();
+const globalDatabase = globalThis as unknown as { formflowDatabase?: PrismaClient };
+export const db =
+  globalDatabase.formflowDatabase ??
+  new PrismaClient({
+    transactionOptions: { maxWait: 10000, timeout: 30000 },
+  });
+if (process.env.NODE_ENV !== 'production') globalDatabase.formflowDatabase = db;
 function key() {
   const value = process.env.DATA_KEY ?? '';
   if (!/^[a-f0-9]{64}$/i.test(value))

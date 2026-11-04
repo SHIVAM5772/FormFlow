@@ -2,6 +2,8 @@ node_modules/
 .npm-cache/
 dist/
 .env
+.env.*
+!.env.example
 coverage/
 test-results/
 playwright-report/
@@ -13,3 +15,5 @@ playwright-report/
 .next-proxy-check/
 *.tsbuildinfo
 next-env.d.ts
+.vercel/
+packages/database/generated/

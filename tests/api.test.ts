@@ -25,7 +25,7 @@ vi.mock('../packages/database/src/index.js', () => ({
     user: { findUnique: mocks.findUnique },
     form: { findFirst: mocks.findFirst },
     auditLog: { create: mocks.audit },
-    $queryRaw: mocks.raw,
+    $runCommandRaw: mocks.raw,
     excelTemplate: { findFirst: mocks.template },
     upload: { upsert: mocks.upload },
     submissionJob: { findFirst: mocks.job, updateMany: mocks.updateJob },
@@ -36,6 +36,7 @@ vi.mock('../packages/database/src/index.js', () => ({
   decrypt: vi.fn(),
 }));
 vi.mock('../packages/submission-engine/src/queue.js', () => ({
+  usesMongoQueue: () => process.env.QUEUE_BACKEND === 'mongodb',
   redisConnection: () => ({ ping: mocks.ping, disconnect: mocks.disconnect }),
   dispatch: vi.fn(async () => {}),
 }));
@@ -44,8 +45,9 @@ let token: string;
 beforeAll(async () => {
   process.env.SESSION_SECRET = 'api-test-session-secret-with-at-least-32-characters';
   process.env.DATA_KEY = 'b'.repeat(64);
-  process.env.DATABASE_URL = 'mysql://test:test@127.0.0.1:3306/formflow_test';
+  process.env.DATABASE_URL = 'mongodb://127.0.0.1:27017/formflow_test?replicaSet=rs0';
   process.env.NODE_ENV = 'test';
+  process.env.QUEUE_BACKEND = 'redis';
   const { createApp } = await import('../apps/api/src/app.js');
   const { signSession } = await import('../apps/api/src/auth.js');
   request = supertest(createApp());
@@ -177,7 +179,10 @@ it('allows an explicit retry for a pre-submit mapping failure but refuses UNKNOW
       .set('Cookie', `session=${token}`)
       .send({ recordId });
   expect((await send()).status).toBe(200);
-  expect(mocks.updateRecord.mock.calls[0][0].where.submitIntentAt).toBeNull();
+  expect(mocks.updateRecord.mock.calls[0][0].where.OR).toEqual([
+    { submitIntentAt: null },
+    { submitIntentAt: { isSet: false } },
+  ]);
   mocks.record.mockResolvedValue({ ...row, status: 'UNKNOWN' });
   expect((await send()).status).toBe(409);
   mocks.record.mockResolvedValue({ ...row, submitIntentAt: new Date() });

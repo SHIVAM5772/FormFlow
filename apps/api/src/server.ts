@@ -5,7 +5,11 @@ import { authenticate } from './auth.js';
 import { config, webOrigins } from './config.js';
 import { socketOriginAllowed } from './origins.js';
 import { db } from '../../../packages/database/src/index.js';
-import { redisConnection, closeQueue } from '../../../packages/submission-engine/src/queue.js';
+import {
+  redisConnection,
+  closeQueue,
+  usesMongoQueue,
+} from '../../../packages/submission-engine/src/queue.js';
 const server = createServer(createApp());
 const io = new Server(server, {
   cors: { origin: [...webOrigins], credentials: true },
@@ -37,10 +41,10 @@ io.on('connection', (socket) => {
   }, 60000);
   socket.on('disconnect', () => clearInterval(expiry));
 });
-const subscriber = redisConnection();
-subscriber.on('error', () => logger.warn('Realtime connection unavailable'));
-void subscriber.subscribe('formflow:progress').catch(() => {});
-subscriber.on('message', (_channel, message) => {
+const subscriber = usesMongoQueue() ? undefined : redisConnection();
+subscriber?.on('error', () => logger.warn('Realtime connection unavailable'));
+void subscriber?.subscribe('formflow:progress').catch(() => {});
+subscriber?.on('message', (_channel, message) => {
   try {
     const { userId, jobId } = JSON.parse(message);
     io.to(userId).emit('job:updated', { jobId });
@@ -54,7 +58,7 @@ async function shutdown() {
   if (stopping) return;
   stopping = true;
   await io.close();
-  subscriber.disconnect();
+  subscriber?.disconnect();
   await closeQueue();
   await db.$disconnect();
 }

@@ -13,6 +13,8 @@ RUN npm ci
 COPY . .
 RUN npm run db:generate && npm run build:server
 ENV NODE_ENV=production
+ENV QUEUE_BACKEND=mongodb
+ENV PORT=4000
 USER pwuser
 EXPOSE 4000
 CMD ["node", "dist/apps/api/src/server.js"]

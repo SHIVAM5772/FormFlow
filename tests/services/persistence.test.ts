@@ -1,7 +1,7 @@
 import 'dotenv/config';
 import { beforeAll, afterAll, it, expect } from 'vitest';
 import supertest from 'supertest';
-import { PrismaClient } from '@prisma/client';
+import { PrismaClient } from '../../packages/database/generated/client/index.js';
 import { Queue, Worker } from 'bullmq';
 import { Redis } from 'ioredis';
 import { randomUUID } from 'node:crypto';
@@ -10,12 +10,13 @@ import { fixtureServer } from '../fixture-server.js';
 import { sampleForm, sampleAnswers } from '../helpers.js';
 import { columns, type FormDefinition } from '../../packages/shared/src/index.js';
 import { submitLocalFixture } from '../../packages/submission-engine/src/browser.js';
+import { usesMongoQueue } from '../../packages/submission-engine/src/queue.js';
 
 // Explicitly opt into a disposable test database. Never create, flush, or reset a user's database.
-const databaseUrl = new URL(process.env.DATABASE_URL ?? 'mysql://invalid/invalid');
+const databaseUrl = new URL(process.env.DATABASE_URL ?? 'mongodb://invalid/invalid');
 if (!databaseUrl.pathname.endsWith('_test'))
   throw new Error('Service tests require DATABASE_URL ending in _test');
-if (!process.env.REDIS_URL?.endsWith('/15'))
+if (!usesMongoQueue() && !process.env.REDIS_URL?.endsWith('/15'))
   throw new Error('Service tests require dedicated REDIS_URL database /15');
 const userId = randomUUID();
 let fixture: Awaited<ReturnType<typeof fixtureServer>>;
@@ -85,11 +86,30 @@ beforeAll(async () => {
 afterAll(async () => {
   if (db) {
     await db.user.deleteMany({ where: { id: userId } });
+    await db.workerLease.deleteMany({ where: { id: 'submission-worker' } });
     await db.$disconnect();
   }
   await fixture?.close();
   const { closeQueue } = await import('../../packages/submission-engine/src/queue.js');
   await closeQueue();
+});
+it('coordinates overlapping MongoDB workers and recovers an expired lease', async () => {
+  const { workerLease } = await import('../../packages/submission-engine/src/lease.js');
+  const first = workerLease();
+  const second = workerLease();
+  expect(await first.acquire()).toBe(true);
+  expect(await second.acquire()).toBe(false);
+  expect(await first.renew()).toBe(true);
+  await db.workerLease.update({
+    where: { id: 'submission-worker' },
+    data: { expiresAt: new Date(0) },
+  });
+  expect(await first.owned()).toBe(false);
+  expect(await second.acquire()).toBe(true);
+  expect(await first.renew()).toBe(false);
+  await first.release();
+  expect(await second.owned()).toBe(true);
+  await second.release();
 });
 it('persists API validation, deduplicates start, honors pause/resume, processes a real browser row and reports it', async () => {
   const start = async () =>
@@ -178,38 +198,41 @@ it('never replays an interrupted in-flight row', async () => {
   );
   expect(fixture.submitted).toHaveLength(before);
 });
-it('uses a durable BullMQ queue and emits real progress through Redis', async () => {
-  const name = `formflow-test-${randomUUID()}`;
-  const connection = new Redis(process.env.REDIS_URL!, { maxRetriesPerRequest: null });
-  const sub = connection.duplicate();
-  const queue = new Queue(name, { connection });
-  const observed: string[] = [];
-  await sub.subscribe(name);
-  sub.on('message', (_channel, message) => observed.push(message));
-  const worker = new Worker(
-    name,
-    async (job) => {
-      await connection.publish(name, String(job.data.value));
-      return { saved: true };
-    },
-    { connection },
-  );
-  try {
-    const job = await queue.add('test', { value: 'progress' });
-    await new Promise<void>((resolve, reject) => {
-      const timeout = setTimeout(() => reject(new Error('Queue timeout')), 10000);
-      worker.on('completed', () => {
-        clearTimeout(timeout);
-        resolve();
+it.skipIf(usesMongoQueue())(
+  'uses a durable BullMQ queue and emits real progress through Redis',
+  async () => {
+    const name = `formflow-test-${randomUUID()}`;
+    const connection = new Redis(process.env.REDIS_URL!, { maxRetriesPerRequest: null });
+    const sub = connection.duplicate();
+    const queue = new Queue(name, { connection });
+    const observed: string[] = [];
+    await sub.subscribe(name);
+    sub.on('message', (_channel, message) => observed.push(message));
+    const worker = new Worker(
+      name,
+      async (job) => {
+        await connection.publish(name, String(job.data.value));
+        return { saved: true };
+      },
+      { connection },
+    );
+    try {
+      const job = await queue.add('test', { value: 'progress' });
+      await new Promise<void>((resolve, reject) => {
+        const timeout = setTimeout(() => reject(new Error('Queue timeout')), 10000);
+        worker.on('completed', () => {
+          clearTimeout(timeout);
+          resolve();
+        });
       });
-    });
-    expect(await job.getState()).toBe('completed');
-    expect(observed).toContain('progress');
-  } finally {
-    await worker.close();
-    await queue.obliterate({ force: true });
-    await queue.close();
-    await sub.quit();
-    await connection.quit();
-  }
-});
+      expect(await job.getState()).toBe('completed');
+      expect(observed).toContain('progress');
+    } finally {
+      await worker.close();
+      await queue.obliterate({ force: true });
+      await queue.close();
+      await sub.quit();
+      await connection.quit();
+    }
+  },
+);

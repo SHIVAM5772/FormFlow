@@ -2,7 +2,13 @@ import { db, decrypt } from '../../database/src/index.js';
 import { formSchema, type Answers, type RecordState } from '../../shared/src/index.js';
 import { submitResponse } from './browser.js';
 export type Progress = (userId: string, jobId: string) => Promise<void>;
-export async function processBatch(jobId: string, publish: Progress, submit = submitResponse) {
+export async function processBatch(
+  jobId: string,
+  publish: Progress,
+  submit = submitResponse,
+  ownsLease: () => Promise<boolean> = async () => true,
+) {
+  if (!(await ownsLease())) return;
   const job = await db.submissionJob.findUnique({
     where: { id: jobId },
     include: { upload: { include: { template: { include: { schema: true } } } } },
@@ -32,6 +38,7 @@ export async function processBatch(jobId: string, publish: Progress, submit = su
   if (!claimed.count) return;
   const form = formSchema.parse(job.upload.template.schema.definition);
   while (true) {
+    if (!(await ownsLease())) return;
     const state = await db.submissionJob.findUnique({ where: { id: jobId } });
     if (state?.status !== 'RUNNING') break;
     const record = await db.submissionRecord.findFirst({
@@ -50,14 +57,16 @@ export async function processBatch(jobId: string, publish: Progress, submit = su
     await publish(job.userId, jobId);
     const result = await submit(form, decrypt<Answers>(record.encryptedAnswers), {
       isStopped: async () =>
+        !(await ownsLease()) ||
         (await db.submissionJob.findUnique({ where: { id: jobId }, select: { status: true } }))
           ?.status !== 'RUNNING',
       beforeSubmit: async () => {
+        if (!(await ownsLease())) return false;
         const updated = await db.submissionRecord.updateMany({
           where: {
             id: record.id,
             status: 'RUNNING',
-            submitIntentAt: null,
+            OR: [{ submitIntentAt: null }, { submitIntentAt: { isSet: false } }],
             job: { status: 'RUNNING' },
           },
           data: { submitIntentAt: new Date() },
@@ -65,6 +74,7 @@ export async function processBatch(jobId: string, publish: Progress, submit = su
         return updated.count === 1;
       },
     });
+    if (!(await ownsLease())) return;
     const current = await db.submissionJob.findUnique({
       where: { id: jobId },
       select: { status: true },

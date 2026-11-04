@@ -1,0 +1,14 @@
+.env
+.env.*
+.git
+node_modules
+.npm-cache
+dist
+packages/database/generated
+apps/web/.next
+apps/web/.next-proxy-check
+test-results
+playwright-report
+coverage
+*.log
+**/*.tsbuildinfo

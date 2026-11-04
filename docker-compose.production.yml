@@ -4,24 +4,23 @@ services:
     command: ['npm', 'run', 'db:deploy']
     env_file: .env
     environment:
-      DATABASE_URL: mysql://formflow:${MYSQL_PASSWORD}@mysql:3306/formflow
+      DATABASE_URL: ${DATABASE_URL:?Set MongoDB DATABASE_URL}
     depends_on:
-      mysql: { condition: service_healthy }
+      mongo-init: { condition: service_completed_successfully }
   api:
     build: .
     command: ['node', 'dist/apps/api/src/server.js']
     env_file: .env
     environment:
       NODE_ENV: production
-      DATABASE_URL: mysql://formflow:${MYSQL_PASSWORD}@mysql:3306/formflow
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: ${DATABASE_URL:?Set MongoDB DATABASE_URL}
+      QUEUE_BACKEND: mongodb
     restart: unless-stopped
     init: true
     shm_size: 512mb
     mem_limit: 1g
     depends_on:
       migrate: { condition: service_completed_successfully }
-      redis: { condition: service_healthy }
     healthcheck:
       test:
         [
@@ -39,8 +38,8 @@ services:
     env_file: .env
     environment:
       NODE_ENV: production
-      DATABASE_URL: mysql://formflow:${MYSQL_PASSWORD}@mysql:3306/formflow
-      REDIS_URL: redis://redis:6379
+      DATABASE_URL: ${DATABASE_URL:?Set MongoDB DATABASE_URL}
+      QUEUE_BACKEND: mongodb
     restart: unless-stopped
     init: true
     shm_size: 1gb
@@ -55,7 +54,6 @@ services:
       retries: 3
     depends_on:
       migrate: { condition: service_completed_successfully }
-      redis: { condition: service_healthy }
   frontend:
     build:
       context: .

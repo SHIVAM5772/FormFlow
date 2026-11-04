@@ -7,6 +7,12 @@ import type {
 const storage = vi.hoisted(() => ({ job: {} as any, records: [] as any[], attempts: [] as any[] }));
 function matches(record: any, where: any) {
   return (
+    (!where.OR ||
+      where.OR.some((clause: any) =>
+        clause.submitIntentAt?.isSet === false
+          ? !Object.hasOwn(record, 'submitIntentAt')
+          : record.submitIntentAt === clause.submitIntentAt,
+      )) &&
     (!where.id || record.id === where.id) &&
     (!where.jobId || record.jobId === where.jobId) &&
     (!where.status ||
@@ -83,6 +89,30 @@ beforeEach(() => {
   process.env.RECORD_DELAY_MS = '1000';
 });
 const publish = async () => {};
+it('does not recover or submit records when the worker does not own its lease', async () => {
+  storage.records[0].status = 'RUNNING';
+  const submit = vi.fn();
+  await processBatch('batch', publish, submit, async () => false);
+  expect(submit).not.toHaveBeenCalled();
+  expect(storage.records[0].status).toBe('RUNNING');
+});
+it('refuses submission when ownership is lost after browser preparation', async () => {
+  let owned = true;
+  const submit = vi.fn(async (_form, _answers, hooks: SubmissionHooks) => {
+    owned = false;
+    expect(await hooks.isStopped()).toBe(true);
+    expect(await hooks.beforeSubmit()).toBe(false);
+    return { status: 'QUEUED' as const };
+  });
+  await processBatch('batch', publish, submit, async () => owned);
+  expect(storage.records[0].submitIntentAt).toBeNull();
+  expect(storage.records[0].status).toBe('RUNNING');
+});
+it('allows first submission when MongoDB omitted the optional intent field', async () => {
+  delete storage.records[0].submitIntentAt;
+  await processBatch('batch', publish, successful);
+  expect(storage.records[0].status).toBe('SUBMITTED');
+});
 async function successful(
   _form: any,
   _answers: any,

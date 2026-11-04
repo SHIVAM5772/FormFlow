@@ -1,129 +1,157 @@
 generator client {
- provider = "prisma-client-js"
+  provider = "prisma-client-js"
+  output   = "../generated/client"
 }
+
+model WorkerLease {
+  id        String   @id @map("_id")
+  owner     String
+  expiresAt DateTime
+
+  @@index([expiresAt])
+}
+
 datasource db {
- provider = "mysql"
- url = env("DATABASE_URL")
+  provider = "mongodb"
+  url      = env("DATABASE_URL")
 }
+
 model User {
- id String @id @default(uuid()) @db.Char(36)
- email String @unique @db.VarChar(191)
- passwordHash String @db.VarChar(255)
- sessionVersion Int @default(0)
- googleRefresh String? @db.Text
- createdAt DateTime @default(now())
- updatedAt DateTime @updatedAt
- forms Form[]
- uploads Upload[]
- jobs SubmissionJob[]
- auditLogs AuditLog[]
+  id             String          @id @default(uuid()) @map("_id")
+  email          String          @unique
+  passwordHash   String
+  sessionVersion Int             @default(0)
+  googleRefresh  String?
+  createdAt      DateTime        @default(now())
+  updatedAt      DateTime        @updatedAt
+  forms          Form[]
+  uploads        Upload[]
+  jobs           SubmissionJob[]
+  auditLogs      AuditLog[]
 }
+
 model Form {
- id String @id @default(uuid()) @db.Char(36)
- userId String @db.Char(36)
- user User @relation(fields:[userId],references:[id],onDelete:Cascade)
- title String @db.VarChar(500)
- sourceUrl String @db.Text
- createdAt DateTime @default(now())
- updatedAt DateTime @updatedAt
- schemas FormSchema[]
- @@index([userId,createdAt])
+  id        String       @id @default(uuid()) @map("_id")
+  userId    String
+  user      User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  title     String
+  sourceUrl String
+  createdAt DateTime     @default(now())
+  updatedAt DateTime     @updatedAt
+  schemas   FormSchema[]
+
+  @@index([userId, createdAt])
 }
+
 model FormSchema {
- id String @id @default(uuid()) @db.Char(36)
- formId String @db.Char(36)
- form Form @relation(fields:[formId],references:[id],onDelete:Cascade)
- version Int
- definition Json
- fingerprint String @db.Char(64)
- createdAt DateTime @default(now())
- questions FormQuestion[]
- templates ExcelTemplate[]
- @@unique([formId,version])
+  id          String          @id @default(uuid()) @map("_id")
+  formId      String
+  form        Form            @relation(fields: [formId], references: [id], onDelete: Cascade)
+  version     Int
+  definition  Json
+  fingerprint String
+  createdAt   DateTime        @default(now())
+  questions   FormQuestion[]
+  templates   ExcelTemplate[]
+
+  @@unique([formId, version])
 }
+
 model FormQuestion {
- id String @id @default(uuid()) @db.Char(36)
- schemaId String @db.Char(36)
- schema FormSchema @relation(fields:[schemaId],references:[id],onDelete:Cascade)
- externalId String @db.VarChar(191)
- title String @db.Text
- type String @db.VarChar(40)
- required Boolean
- metadata Json
- @@unique([schemaId,externalId])
+  id         String     @id @default(uuid()) @map("_id")
+  schemaId   String
+  schema     FormSchema @relation(fields: [schemaId], references: [id], onDelete: Cascade)
+  externalId String
+  title      String
+  type       String
+  required   Boolean
+  metadata   Json
+
+  @@unique([schemaId, externalId])
 }
+
 model ExcelTemplate {
- id String @id @default(uuid()) @db.Char(36)
- schemaId String @db.Char(36)
- schema FormSchema @relation(fields:[schemaId],references:[id],onDelete:Cascade)
- createdAt DateTime @default(now())
- uploads Upload[]
+  id        String     @id @default(uuid()) @map("_id")
+  schemaId  String
+  schema    FormSchema @relation(fields: [schemaId], references: [id], onDelete: Cascade)
+  createdAt DateTime   @default(now())
+  uploads   Upload[]
 }
+
 model Upload {
- id String @id @default(uuid()) @db.Char(36)
- userId String @db.Char(36)
- user User @relation(fields:[userId],references:[id],onDelete:Cascade)
- templateId String @db.Char(36)
- template ExcelTemplate @relation(fields:[templateId],references:[id],onDelete:Cascade)
- checksum String @db.Char(64)
- total Int
- valid Int
- invalid Int
- encryptedData String @db.LongText
- createdAt DateTime @default(now())
- job SubmissionJob?
- @@unique([userId,checksum,templateId])
- @@index([createdAt])
+  id            String         @id @default(uuid()) @map("_id")
+  userId        String
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  templateId    String
+  template      ExcelTemplate  @relation(fields: [templateId], references: [id], onDelete: Cascade)
+  checksum      String
+  total         Int
+  valid         Int
+  invalid       Int
+  encryptedData String
+  createdAt     DateTime       @default(now())
+  job           SubmissionJob?
+
+  @@unique([userId, checksum, templateId])
+  @@index([createdAt])
 }
+
 model SubmissionJob {
- id String @id @default(uuid()) @db.Char(36)
- userId String @db.Char(36)
- user User @relation(fields:[userId],references:[id],onDelete:Cascade)
- uploadId String @unique @db.Char(36)
- upload Upload @relation(fields:[uploadId],references:[id],onDelete:Cascade)
- title String @db.VarChar(500)
- status String @default("QUEUED") @db.VarChar(40)
- reason String? @db.Text
- authorizedAt DateTime
- createdAt DateTime @default(now())
- updatedAt DateTime @updatedAt
- records SubmissionRecord[]
- @@index([userId,createdAt])
- @@index([status])
+  id           String             @id @default(uuid()) @map("_id")
+  userId       String
+  user         User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  uploadId     String             @unique
+  upload       Upload             @relation(fields: [uploadId], references: [id], onDelete: Cascade)
+  title        String
+  status       String             @default("QUEUED")
+  reason       String?
+  authorizedAt DateTime
+  createdAt    DateTime           @default(now())
+  updatedAt    DateTime           @updatedAt
+  records      SubmissionRecord[]
+
+  @@index([userId, createdAt])
+  @@index([status])
 }
+
 model SubmissionRecord {
- id String @id @default(uuid()) @db.Char(36)
- jobId String @db.Char(36)
- job SubmissionJob @relation(fields:[jobId],references:[id],onDelete:Cascade)
- rowNumber Int
- encryptedAnswers String @db.LongText
- status String @default("QUEUED") @db.VarChar(40)
- attemptCount Int @default(0)
- submitIntentAt DateTime?
- submittedAt DateTime?
- error String? @db.Text
- createdAt DateTime @default(now())
- updatedAt DateTime @updatedAt
- attempts SubmissionAttempt[]
- @@unique([jobId,rowNumber])
- @@index([jobId,status])
+  id               String              @id @default(uuid()) @map("_id")
+  jobId            String
+  job              SubmissionJob       @relation(fields: [jobId], references: [id], onDelete: Cascade)
+  rowNumber        Int
+  encryptedAnswers String
+  status           String              @default("QUEUED")
+  attemptCount     Int                 @default(0)
+  submitIntentAt   DateTime?
+  submittedAt      DateTime?
+  error            String?
+  createdAt        DateTime            @default(now())
+  updatedAt        DateTime            @updatedAt
+  attempts         SubmissionAttempt[]
+
+  @@unique([jobId, rowNumber])
+  @@index([jobId, status])
 }
+
 model SubmissionAttempt {
- id String @id @default(uuid()) @db.Char(36)
- recordId String @db.Char(36)
- record SubmissionRecord @relation(fields:[recordId],references:[id],onDelete:Cascade)
- startedAt DateTime @default(now())
- finishedAt DateTime?
- status String @db.VarChar(40)
- error String? @db.Text
- @@index([recordId,startedAt])
+  id         String           @id @default(uuid()) @map("_id")
+  recordId   String
+  record     SubmissionRecord @relation(fields: [recordId], references: [id], onDelete: Cascade)
+  startedAt  DateTime         @default(now())
+  finishedAt DateTime?
+  status     String
+  error      String?
+
+  @@index([recordId, startedAt])
 }
+
 model AuditLog {
- id String @id @default(uuid()) @db.Char(36)
- userId String @db.Char(36)
- user User @relation(fields:[userId],references:[id],onDelete:Cascade)
- action String @db.VarChar(80)
- entityId String? @db.Char(36)
- createdAt DateTime @default(now())
- @@index([userId,createdAt])
+  id        String   @id @default(uuid()) @map("_id")
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  action    String
+  entityId  String?
+  createdAt DateTime @default(now())
+
+  @@index([userId, createdAt])
 }
