@@ -23,6 +23,12 @@ Keep SESSION_SECRET and DATA_KEY stable. MongoDB must support replica-set transa
 
 New users can choose **Sign up** on the sign-in screen or visit `/signup`. Enter your full name, email, phone number, address, date of birth and gender, then set and confirm a password of at least 12 characters. Signup sends a six-digit email OTP; only successful verification creates an account and signs the user into their workspace. The account creation command remains available for administrators.
 
+## Update profile and email
+
+Click your account email in the sidebar and choose **View profile**, or open `/profile`. The profile opens in view mode with personal information, recent workspace activity and email verification status. Choose **Edit profile** to open the prefilled form; **Back to profile** discards unsaved edits. Personal details save separately from the account email. Changing email sends a six-digit OTP to the new address through the existing SMTP configuration; the old address remains active until verification succeeds. Codes expire in 10 minutes, permit at most five attempts, and can be resent after 60 seconds with a limit of five sends per account per 15 minutes. Successful verification refreshes the current browser session and revokes older account sessions.
+
+Email-change challenges use the `EmailChangeVerification` MongoDB collection, separate from signup challenges. Regenerate the Prisma client after pulling schema changes and restart the local API. No additional SMTP variables are required. Retention cleans up expired challenges without immediately resetting send limits.
+
 ## Excel checkbox selections
 
 New Excel templates include checkbox option lists compatible with the optional Windows desktop [FormFlow multi-select add-in](excel-addin/README.md). With the add-in loaded, double-click a checkbox cell for a tick menu, or choose dropdown options one by one to toggle them in the same cell. The response file stays `.xlsx`. Without the add-in, separate exact choice labels with semicolons. The add-in source and build/setup instructions are local; no prebuilt binary is included.

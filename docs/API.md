@@ -44,6 +44,21 @@ Typical errors: 400 invalid input/upload, 401 missing/expired session, 403 Origi
 
 The schema states are `PENDING`, `VALIDATING`, `QUEUED`, `RUNNING`, `SUBMITTED`, `FAILED`, `UNKNOWN`, `NEEDS_MANUAL_ACTION`, `CANCELLED`. Uploaded validation rows are represented separately until authorized; only valid rows become submission records. Job states are `QUEUED`, `RUNNING`, `PAUSED`, `COMPLETED`, `CANCELLED`; COMPLETED means processing has ended and may include failed or unknown outcomes.
 
+## Profile and account email
+
+All profile endpoints require an authenticated session and the normal same-origin mutation checks. They always operate on the signed-in account; request bodies cannot select another user.
+
+| Method / path                       | Input                                           | Result                                                                                                              |
+| ----------------------------------- | ----------------------------------------------- | ------------------------------------------------------------------------------------------------------------------- |
+| GET `/profile`                      | —                                               | Public profile fields and any active `pendingEmailChange` (no passwords, tokens or OTP hashes)                      |
+| PATCH `/profile`                    | `{name,phoneNumber,address,dateOfBirth,gender}` | Validated updated profile; email and account/security fields are rejected                                           |
+| POST `/profile/email-change`        | `{email}`                                       | 202; sends OTP to the normalized new email and returns `email`, `verificationId`, `expiresAt`, `resendAfterSeconds` |
+| POST `/profile/email-change/resend` | `{verificationId}`                              | 202; replaces the OTP/challenge ID, subject to send limits                                                          |
+| POST `/profile/email-change/verify` | `{verificationId,code}`                         | Updated verified email, a refreshed session cookie, and revocation of previous account sessions                     |
+| DELETE `/profile/email-change`      | —                                               | Cancels pending verification while retaining send counters                                                          |
+
+The old email is retained until a correct OTP is consumed atomically with the email update. A challenge is bound to the account, original email and session version. Codes expire after 10 minutes with at most five attempts; resends require 60 seconds and are capped at five emails per account per 15 minutes, including changes of target address. Duplicate addresses return 409 `EMAIL_EXISTS`; invalid, expired or consumed codes return 400 `OTP_INVALID`. Delivery failures return 503 and do not change the account email.
+
 ## Real-time progress
 
 Socket.IO at `/socket.io` uses the same session cookie and exact allowed Origin. The server joins only the authenticated user's room. `job:updated` emits `{jobId}` as an invalidation event; retrieve current job/records via REST. The UI also polls, so missing events are recoverable. No response answers are emitted.

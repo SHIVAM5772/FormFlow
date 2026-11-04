@@ -24,6 +24,14 @@ export function signupMailConfig() {
 }
 
 export async function sendSignupCode(email: string, code: string) {
+  return sendCode(email, code, false);
+}
+
+export async function sendEmailChangeCode(email: string, code: string) {
+  return sendCode(email, code, true);
+}
+
+async function sendCode(email: string, code: string, emailChange: boolean) {
   const config = signupMailConfig();
   const secure = config.SMTP_SECURE ? config.SMTP_SECURE === 'true' : config.SMTP_PORT === 465;
   const local = ['localhost', '127.0.0.1', '::1'].includes(config.SMTP_HOST);
@@ -45,8 +53,10 @@ export async function sendSignupCode(email: string, code: string) {
     const info = await transport.sendMail({
       from: config.MAIL_FROM,
       to: email,
-      subject: 'Verify your FormFlow email address',
-      text: `Your FormFlow verification code is ${code}.\n\nThis code expires in 10 minutes. Do not share it with anyone.\nIf you did not request an account, you can ignore this email.`,
+      subject: emailChange
+        ? 'Verify your new FormFlow email address'
+        : 'Verify your FormFlow email address',
+      text: `Your FormFlow verification code is ${code}.\n\nThis code expires in 10 minutes. Do not share it with anyone.\n${emailChange ? 'This code confirms a change to your account email. If you did not request this change, ignore this email.' : 'If you did not request an account, you can ignore this email.'}`,
     });
     if (!info.accepted.length) throw new Error('Email was not accepted');
   } finally {

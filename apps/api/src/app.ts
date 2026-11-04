@@ -32,6 +32,15 @@ import { config, webOrigins } from './config.js';
 import { cookieOptions, requireAuth, sameOrigin, signSession } from './auth.js';
 import { google, googleAccess } from './google.js';
 import { requestSignup, resendSignup, verifySignup, SignupError } from './signup.js';
+import {
+  getProfile,
+  updateProfile,
+  requestEmailChange,
+  resendEmailChange,
+  verifyEmailChange,
+  cancelEmailChange,
+  ProfileError,
+} from './profile.js';
 
 export const logger = pino({
   redact: [
@@ -194,6 +203,55 @@ export function createApp() {
   app.use('/api', requireAuth);
   app.get('/api/auth/me', (_req, res) =>
     res.json({ data: { id: uid(res), email: res.locals.user.email } }),
+  );
+  app.get(
+    '/api/profile',
+    asyncRoute(async (_req, res) => {
+      res.json({ data: await getProfile(res.locals.user) });
+    }),
+  );
+  app.patch(
+    '/api/profile',
+    asyncRoute(async (req, res) => {
+      res.json({ data: await updateProfile(uid(res), req.body) });
+    }),
+  );
+  const emailChangeLimit = rateLimit({
+    windowMs: 15 * 60000,
+    limit: 30,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+  });
+  app.post(
+    '/api/profile/email-change',
+    emailChangeLimit,
+    asyncRoute(async (req, res) => {
+      res.status(202).json({ data: await requestEmailChange(res.locals.user, req.body) });
+    }),
+  );
+  app.post(
+    '/api/profile/email-change/resend',
+    emailChangeLimit,
+    asyncRoute(async (req, res) => {
+      res.status(202).json({ data: await resendEmailChange(res.locals.user, req.body) });
+    }),
+  );
+  app.post(
+    '/api/profile/email-change/verify',
+    emailChangeLimit,
+    asyncRoute(async (req, res) => {
+      const { sessionVersion, ...profile } = await verifyEmailChange(res.locals.user, req.body);
+      const token = await signSession(profile.id, sessionVersion);
+      res.cookie('session', token, { ...cookieOptions, maxAge: 8 * 3600000 });
+      res.json({ data: profile });
+    }),
+  );
+  app.delete(
+    '/api/profile/email-change',
+    asyncRoute(async (_req, res) => {
+      await cancelEmailChange(uid(res));
+      res.json({ data: { cancelled: true } });
+    }),
   );
   app.post(
     '/api/auth/logout',
@@ -741,7 +799,11 @@ export function createApp() {
       });
       return;
     }
-    if (error instanceof HttpError || error instanceof SignupError) {
+    if (
+      error instanceof HttpError ||
+      error instanceof SignupError ||
+      error instanceof ProfileError
+    ) {
       res.status(error.status).json({ error: { code: error.code, message: error.message } });
       return;
     }

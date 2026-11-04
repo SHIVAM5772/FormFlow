@@ -1,7 +1,11 @@
 import { afterEach, beforeEach, expect, it, vi } from 'vitest';
 const mail = vi.hoisted(() => ({ send: vi.fn(), close: vi.fn(), create: vi.fn() }));
 vi.mock('nodemailer', () => ({ default: { createTransport: mail.create } }));
-import { sendSignupCode, signupMailConfig } from '../apps/api/src/signup-email.js';
+import {
+  sendSignupCode,
+  sendEmailChangeCode,
+  signupMailConfig,
+} from '../apps/api/src/signup-email.js';
 beforeEach(() => {
   vi.resetAllMocks();
   vi.stubEnv('NODE_ENV', 'test');
@@ -30,6 +34,17 @@ it('requires host and sender configuration without silently pretending to send',
   expect(() => signupMailConfig()).toThrow('Email delivery is not configured');
   await expect(sendSignupCode('test@example.com', '012345')).rejects.toThrow();
   expect(mail.send).not.toHaveBeenCalled();
+});
+it('sends email-change OTPs with a purpose-specific message using the configured transport', async () => {
+  await sendEmailChangeCode('new@example.com', '012345');
+  expect(mail.send).toHaveBeenCalledWith(
+    expect.objectContaining({
+      to: 'new@example.com',
+      subject: 'Verify your new FormFlow email address',
+      text: expect.stringContaining('change to your account email'),
+    }),
+  );
+  expect(mail.close).toHaveBeenCalledOnce();
 });
 it('rejects incomplete SMTP credentials and failed recipients', async () => {
   vi.stubEnv('SMTP_PASSWORD', '');

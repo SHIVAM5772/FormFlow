@@ -1,0 +1,27 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 440 240" fill="none">
+  <defs>
+    <linearGradient id="orbit" x1="50" y1="210" x2="370" y2="30" gradientUnits="userSpaceOnUse"><stop stop-color="#b4f2d1" stop-opacity="0"/><stop offset=".5" stop-color="#51d788"/><stop offset="1" stop-color="#079749"/></linearGradient>
+    <linearGradient id="paper" x2="1" y2="1"><stop stop-color="#a35bff"/><stop offset="1" stop-color="#5e20c4"/></linearGradient>
+    <linearGradient id="excel" x2="1" y2="1"><stop stop-color="#18be62"/><stop offset="1" stop-color="#006c36"/></linearGradient>
+    <linearGradient id="badge" x2="1" y2="1"><stop stop-color="#00a54d"/><stop offset="1" stop-color="#004d2e"/></linearGradient>
+    <filter id="shadow" x="-50%" y="-40%" width="200%" height="200%"><feDropShadow dx="0" dy="13" stdDeviation="11" flood-color="#087341" flood-opacity=".16"/></filter>
+  </defs>
+  <ellipse cx="221" cy="211" rx="145" ry="11" fill="#079749" opacity=".05"/>
+  <ellipse cx="220" cy="119" rx="185" ry="73" transform="rotate(-17 220 119)" stroke="url(#orbit)" stroke-width="13"/>
+  <circle cx="55" cy="147" r="5" fill="#a6edbf"/>
+  <circle cx="361" cy="42" r="5" fill="#21bd60"/>
+  <g filter="url(#shadow)">
+    <path d="M102 58h61l25 25v95a8 8 0 0 1-8 8h-78a8 8 0 0 1-8-8V66a8 8 0 0 1 8-8Z" fill="url(#paper)"/>
+    <path d="M163 58v19a6 6 0 0 0 6 6h19" fill="#d4b4ff"/>
+    <g fill="#fff"><circle cx="115" cy="105" r="4"/><circle cx="115" cy="126" r="4"/><circle cx="115" cy="147" r="4"/></g>
+    <path d="M129 105h36m-36 21h36m-36 21h25" stroke="#fff" stroke-width="6" stroke-linecap="round"/>
+    <rect x="282" y="56" width="91" height="117" rx="9" fill="url(#excel)"/>
+    <path d="M300 78h54v72h-54V78Zm0 18h54m-54 18h54m-54 18h54m-36-54v72m18-72v72" stroke="#c5ffdc" stroke-width="2.5"/>
+    <rect x="258" y="83" width="65" height="73" rx="7" fill="url(#badge)"/>
+    <path d="m277 103 27 34m0-34-27 34" stroke="#fff" stroke-width="7"/>
+    <circle cx="365" cy="172" r="28" fill="#fff"/>
+    <circle cx="365" cy="172" r="22" fill="url(#badge)"/>
+    <path d="m355 172 7 7 13-15" stroke="#fff" stroke-width="4" stroke-linecap="round" stroke-linejoin="round"/>
+  </g>
+  <path d="m211 108 11 11-11 11m13-22 11 11-11 11" stroke="#009e48" stroke-width="5" stroke-linecap="round" stroke-linejoin="round"/>
+</svg>

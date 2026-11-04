@@ -9,6 +9,9 @@ try {
   await db.signupVerification.deleteMany({
     where: { expiresAt: { lt: new Date(Date.now() - 15 * 60000) } },
   });
+  await db.emailChangeVerification.deleteMany({
+    where: { expiresAt: { lt: new Date(Date.now() - 15 * 60000) } },
+  });
   const result = await db.upload.deleteMany({
     where: {
       createdAt: { lt: cutoff },

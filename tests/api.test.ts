@@ -5,6 +5,12 @@ import { columns } from '../packages/shared/src/index.js';
 import { generateTemplate } from '../packages/excel-engine/src/index.js';
 import ExcelJS from 'exceljs';
 const mocks = vi.hoisted(() => ({
+  getProfile: vi.fn(),
+  updateProfile: vi.fn(),
+  requestEmailChange: vi.fn(),
+  resendEmailChange: vi.fn(),
+  verifyEmailChange: vi.fn(),
+  cancelEmailChange: vi.fn(),
   signupRequest: vi.fn(),
   signupVerify: vi.fn(),
   signupResend: vi.fn(),
@@ -24,6 +30,23 @@ const mocks = vi.hoisted(() => ({
   updateRecord: vi.fn(),
   updateJob: vi.fn(),
   transaction: vi.fn(),
+}));
+vi.mock('../apps/api/src/profile.js', () => ({
+  getProfile: mocks.getProfile,
+  updateProfile: mocks.updateProfile,
+  requestEmailChange: mocks.requestEmailChange,
+  resendEmailChange: mocks.resendEmailChange,
+  verifyEmailChange: mocks.verifyEmailChange,
+  cancelEmailChange: mocks.cancelEmailChange,
+  ProfileError: class extends Error {
+    constructor(
+      public status: number,
+      message: string,
+      public code: string,
+    ) {
+      super(message);
+    }
+  },
 }));
 vi.mock('../apps/api/src/signup.js', () => ({
   requestSignup: mocks.signupRequest,
@@ -92,6 +115,95 @@ beforeEach(() => {
     email: 'test@example.com',
     sessionVersion: 0,
   });
+});
+it('authenticates profile routes and rejects cross-origin changes', async () => {
+  expect((await request.get('/api/profile')).status).toBe(401);
+  expect(
+    (
+      await request
+        .post('/api/profile/email-change')
+        .set('Origin', 'http://localhost:3000')
+        .send({ email: 'new@example.com' })
+    ).status,
+  ).toBe(401);
+  expect(mocks.getProfile).not.toHaveBeenCalled();
+  expect(mocks.requestEmailChange).not.toHaveBeenCalled();
+  expect(
+    (
+      await request
+        .patch('/api/profile')
+        .set('Cookie', `session=${token}`)
+        .set('Origin', 'https://evil.example')
+        .send({ name: 'Bypass' })
+    ).status,
+  ).toBe(403);
+  expect(mocks.updateProfile).not.toHaveBeenCalled();
+});
+it('reads and updates only the signed-in user profile', async () => {
+  mocks.getProfile.mockResolvedValue({
+    id: 'current',
+    email: 'test@example.com',
+    name: 'Test Person',
+  });
+  const result = await request.get('/api/profile').set('Cookie', `session=${token}`);
+  expect(result.status).toBe(200);
+  expect(result.body.data.email).toBe('test@example.com');
+  expect(mocks.getProfile).toHaveBeenCalledWith(
+    expect.objectContaining({ id: '7926ad27-2a8b-487a-adf1-010723b037a3' }),
+  );
+  mocks.updateProfile.mockResolvedValue({ name: 'Updated Person' });
+  const body = { name: 'Updated Person' };
+  const updated = await request
+    .patch('/api/profile')
+    .set('Cookie', `session=${token}`)
+    .set('Origin', 'http://localhost:3000')
+    .send(body);
+  expect(updated.status).toBe(200);
+  expect(mocks.updateProfile).toHaveBeenCalledWith('7926ad27-2a8b-487a-adf1-010723b037a3', body);
+});
+it('issues an email-change challenge without changing the session and rotates it only after verification', async () => {
+  const verificationId = '550e8400-e29b-41d4-a716-446655440000';
+  mocks.requestEmailChange.mockResolvedValue({ email: 'new@example.com', verificationId });
+  const requested = await request
+    .post('/api/profile/email-change')
+    .set('Cookie', `session=${token}`)
+    .set('Origin', 'http://localhost:3000')
+    .send({ email: 'new@example.com' });
+  expect(requested.status).toBe(202);
+  expect(requested.headers['set-cookie']).toBeUndefined();
+  const { ProfileError } = await import('../apps/api/src/profile.js');
+  mocks.verifyEmailChange.mockRejectedValueOnce(
+    new ProfileError(400, 'Incorrect OTP', 'OTP_INVALID'),
+  );
+  const wrong = await request
+    .post('/api/profile/email-change/verify')
+    .set('Cookie', `session=${token}`)
+    .set('Origin', 'http://localhost:3000')
+    .send({ verificationId, code: '000000' });
+  expect(wrong.status).toBe(400);
+  expect(wrong.headers['set-cookie']).toBeUndefined();
+  mocks.verifyEmailChange.mockResolvedValue({
+    id: '7926ad27-2a8b-487a-adf1-010723b037a3',
+    email: 'new@example.com',
+    sessionVersion: 1,
+  });
+  const verified = await request
+    .post('/api/profile/email-change/verify')
+    .set('Cookie', `session=${token}`)
+    .set('Origin', 'http://localhost:3000')
+    .send({ verificationId, code: '123456' });
+  expect(verified.status).toBe(200);
+  expect(verified.body.data).not.toHaveProperty('sessionVersion');
+  const newCookie = verified.headers['set-cookie'][0].split(';')[0];
+  mocks.findUnique.mockResolvedValue({
+    id: '7926ad27-2a8b-487a-adf1-010723b037a3',
+    email: 'new@example.com',
+    sessionVersion: 1,
+  });
+  expect((await request.get('/api/auth/me').set('Cookie', newCookie)).body.data.email).toBe(
+    'new@example.com',
+  );
+  expect((await request.get('/api/auth/me').set('Cookie', `session=${token}`)).status).toBe(401);
 });
 it('starts signup without issuing a session or creating a user', async () => {
   mocks.signupRequest.mockResolvedValue({

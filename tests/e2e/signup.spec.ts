@@ -15,6 +15,157 @@ async function fillProfile(page: Page) {
   await page.getByLabel('Gender', { exact: true }).selectOption(profile.gender);
 }
 
+test('checks confirmation live when either password changes and blocks paste and drop', async ({
+  page,
+}) => {
+  await page.route('**/api/**', (route) =>
+    route.fulfill({ status: 401, json: { error: { message: 'Sign in to continue' } } }),
+  );
+  await page.goto('/signup');
+  const password = page.getByLabel('Password', { exact: true });
+  const confirm = page.getByLabel('Confirm password', { exact: true });
+  await password.fill('a-valid-password');
+  await confirm.pressSequentially('different');
+  await expect(page.getByText('Passwords do not match', { exact: true })).toBeVisible();
+  await expect(confirm).toHaveAttribute('aria-invalid', 'true');
+  await confirm.fill('');
+  await confirm.pressSequentially('a-valid-password');
+  await expect(page.getByText('Passwords match', { exact: true })).toBeVisible();
+  await expect(confirm).toHaveAttribute('aria-invalid', 'false');
+  await password.fill('another-password');
+  await expect(page.getByText('Passwords do not match', { exact: true })).toBeVisible();
+  await password.fill('a-valid-password');
+  await expect(page.getByText('Passwords match', { exact: true })).toBeVisible();
+  await confirm.fill('');
+  expect(
+    await confirm.evaluate((input) => {
+      const clipboard = new DataTransfer();
+      clipboard.setData('text/plain', 'a-valid-password');
+      return input.dispatchEvent(
+        new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: clipboard }),
+      );
+    }),
+  ).toBe(false);
+  expect(
+    await confirm.evaluate((input) => {
+      const dataTransfer = new DataTransfer();
+      dataTransfer.setData('text/plain', 'a-valid-password');
+      return input.dispatchEvent(
+        new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer }),
+      );
+    }),
+  ).toBe(false);
+  await expect(confirm).toHaveValue('');
+  await expect(page.getByText('Passwords match', { exact: true })).toHaveCount(0);
+  await confirm.pressSequentially('a-valid-password');
+  await expect(page.getByText('Passwords match', { exact: true })).toBeVisible();
+});
+
+test('preserves signup details and OTP while rechecking the session after a tab switch', async ({
+  page,
+}) => {
+  let checks = 0;
+  await page.route('**/api/**', async (route) => {
+    if (new URL(route.request().url()).pathname === '/api/auth/me') {
+      checks++;
+      if (checks > 1) await new Promise((resolve) => setTimeout(resolve, 800));
+      await route.fulfill({ status: 401, json: { error: { message: 'Sign in to continue' } } });
+    } else {
+      await route.fulfill({
+        status: 202,
+        json: {
+          data: {
+            email: 'new@example.com',
+            verificationId: '550e8400-e29b-41d4-a716-446655440000',
+            expiresAt: new Date(Date.now() + 600000).toISOString(),
+            resendAfterSeconds: 60,
+          },
+        },
+      });
+    }
+  });
+  await page.goto('/signup');
+  await fillProfile(page);
+  await page.getByLabel('Email address').fill('new@example.com');
+  await page.getByLabel('Password', { exact: true }).fill('new-user-password');
+  await page.getByLabel('Confirm password').fill('new-user-password');
+  async function refocusWithoutLosingForm() {
+    const before = checks;
+    const response = page.waitForResponse('**/api/auth/me');
+    // TanStack listens for visibilitychange when a browser tab becomes visible.
+    await page.evaluate(() => {
+      // Headless runs may keep the tab hidden; model an actual hidden -> visible switch.
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'hidden' });
+      window.dispatchEvent(new Event('visibilitychange'));
+      Object.defineProperty(document, 'visibilityState', { configurable: true, value: 'visible' });
+      window.dispatchEvent(new Event('visibilitychange'));
+    });
+    await expect.poll(() => checks).toBe(before + 1);
+    await expect(page.getByText('Opening FormFlow…', { exact: true })).toHaveCount(0);
+    return response;
+  }
+  await refocusWithoutLosingForm();
+  await expect(page.getByLabel('Full name')).toHaveValue(profile.name);
+  await expect(page.getByLabel('Email address')).toHaveValue('new@example.com');
+  await expect(page.getByLabel('Password', { exact: true })).toHaveValue('new-user-password');
+  await expect(page.getByLabel('Confirm password')).toHaveValue('new-user-password');
+  await page.getByRole('button', { name: 'Send verification code', exact: true }).click();
+  await page.getByLabel('Email OTP').fill('123456');
+  await refocusWithoutLosingForm();
+  await expect(page.getByRole('heading', { name: 'Verify your email' })).toBeVisible();
+  await expect(page.getByLabel('Email OTP')).toHaveValue('123456');
+});
+
+for (const viewport of [
+  { width: 1440, height: 800 },
+  { width: 1280, height: 600 },
+  { width: 390, height: 844 },
+]) {
+  test(`scrolls only signup fields with fixed heading and actions at ${viewport.width}x${viewport.height}`, async ({
+    page,
+  }) => {
+    await page.setViewportSize(viewport);
+    await page.route('**/api/**', (route) =>
+      route.fulfill({ status: 401, json: { error: { message: 'Sign in to continue' } } }),
+    );
+    await page.goto('/signup');
+    const heading = page.getByRole('heading', { name: 'Create your account' });
+    const send = page.getByRole('button', { name: 'Send verification code', exact: true });
+    const signIn = page.getByRole('link', { name: 'Sign in', exact: true });
+    const fields = page.getByRole('region', { name: 'Signup fields' });
+    await expect(heading).toBeVisible();
+    const before = await Promise.all([
+      heading.boundingBox(),
+      send.boundingBox(),
+      signIn.boundingBox(),
+      page.locator('.login-story').boundingBox(),
+    ]);
+    await fields.evaluate((el) => {
+      el.scrollTop = el.scrollHeight;
+    });
+    await expect.poll(() => fields.evaluate((el) => el.scrollTop)).toBeGreaterThan(0);
+    await expect(page.getByLabel('Confirm password')).toBeInViewport();
+    await expect(send).toBeInViewport();
+    await expect(signIn).toBeInViewport();
+    const after = await Promise.all([
+      heading.boundingBox(),
+      send.boundingBox(),
+      signIn.boundingBox(),
+      page.locator('.login-story').boundingBox(),
+    ]);
+    expect(after).toEqual(before);
+    expect(
+      await page.evaluate(() => ({
+        scroll: window.scrollY,
+        overflow: document.documentElement.scrollHeight - window.innerHeight,
+      })),
+    ).toEqual({ scroll: 0, overflow: 0 });
+    await page.screenshot({
+      path: `test-results/signup-fixed-${viewport.width}x${viewport.height}.png`,
+    });
+  });
+}
+
 test('opens signup from login, validates confirmation and signs a new user into their workspace', async ({
   page,
 }) => {

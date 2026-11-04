@@ -50,6 +50,21 @@ model SignupVerification {
   createdAt        DateTime @default(now())
 }
 
+model EmailChangeVerification {
+  userId           String   @id @map("_id")
+  email            String
+  previousEmail    String
+  sessionVersion   Int
+  generation       String
+  codeHash         String
+  expiresAt        DateTime
+  attempts         Int      @default(0)
+  ready            Boolean  @default(false)
+  lastSentAt       DateTime
+  sendWindowStart  DateTime
+  sendCount        Int
+}
+
 model Form {
   id        String       @id @default(uuid()) @map("_id")
   userId    String
