@@ -7,6 +7,7 @@ import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { useForm } from 'react-hook-form';
 import { zodResolver } from '@hookform/resolvers/zod';
 import { z } from 'zod';
+import { genderOptions, signupProfileSchema } from '../../../packages/shared/src/account';
 import {
   Activity,
   ArrowDownToLine,
@@ -306,8 +307,60 @@ export function FormFlowShell({ children }: { children: ReactNode }) {
 }
 function Login({ signup = false }: { signup?: boolean }) {
   const client = useQueryClient();
+  type Verification = {
+    email: string;
+    verificationId: string;
+    expiresAt: string;
+    resendAfterSeconds: number;
+  };
+  const [verification, setVerification] = useState<Verification | null>(null);
+  const [resendAt, setResendAt] = useState(0);
+  const [now, setNow] = useState(Date.now());
+  useEffect(() => {
+    if (!verification) return;
+    const timer = setInterval(() => setNow(Date.now()), 1000);
+    return () => clearInterval(timer);
+  }, [verification]);
+  const otpSchema = z.object({
+    code: z
+      .string()
+      .trim()
+      .regex(/^\d{6}$/, 'Enter the 6-digit code from your email'),
+  });
+  const otpForm = useForm<z.infer<typeof otpSchema>>({ resolver: zodResolver(otpSchema) });
+  function acceptVerification(next: Verification) {
+    setVerification(next);
+    setNow(Date.now());
+    setResendAt(Date.now() + next.resendAfterSeconds * 1000);
+    otpForm.reset();
+  }
+  const verifyMutation = useMutation({
+    mutationFn: ({ code }: z.infer<typeof otpSchema>) =>
+      api.post('/auth/signup/verify', {
+        email: verification?.email,
+        verificationId: verification?.verificationId,
+        code,
+      }),
+    onSuccess: () => client.invalidateQueries({ queryKey: ['me'] }),
+  });
+  const resendMutation = useMutation({
+    mutationFn: () =>
+      api.post('/auth/signup/resend', {
+        email: verification?.email,
+        verificationId: verification?.verificationId,
+      }),
+    onSuccess: (response) => {
+      acceptVerification(response.data.data);
+      verifyMutation.reset();
+    },
+  });
   const schema = z
     .object({
+      name: signup ? signupProfileSchema.shape.name : z.string().optional(),
+      phoneNumber: signup ? signupProfileSchema.shape.phoneNumber : z.string().optional(),
+      address: signup ? signupProfileSchema.shape.address : z.string().optional(),
+      dateOfBirth: signup ? signupProfileSchema.shape.dateOfBirth : z.string().optional(),
+      gender: signup ? signupProfileSchema.shape.gender : z.string().optional(),
       email: z.string().trim().email('Enter your email address').max(191),
       password: signup
         ? z
@@ -327,9 +380,19 @@ function Login({ signup = false }: { signup?: boolean }) {
     });
   const form = useForm<z.infer<typeof schema>>({ resolver: zodResolver(schema) });
   const mutation = useMutation({
-    mutationFn: ({ email, password }: z.infer<typeof schema>) =>
-      api.post(signup ? '/auth/signup' : '/auth/login', { email, password }),
-    onSuccess: () => client.invalidateQueries({ queryKey: ['me'] }),
+    mutationFn: (body: z.infer<typeof schema>) =>
+      api.post(signup ? '/auth/signup' : '/auth/login', {
+        ...(signup ? signupProfileSchema.parse(body) : {}),
+        email: body.email,
+        password: body.password,
+      }),
+    onSuccess: (response) => {
+      if (signup) {
+        acceptVerification(response.data.data);
+        form.resetField('password');
+        form.resetField('confirmPassword');
+      } else return client.invalidateQueries({ queryKey: ['me'] });
+    },
   });
   return (
     <div className="login-shell">
@@ -362,66 +425,202 @@ function Login({ signup = false }: { signup?: boolean }) {
         <small>Authorized submissions · Verified outcomes</small>
       </div>
       <div className="login-panel">
-        <div className="login-card">
+        <div className={signup ? 'login-card signup-card' : 'login-card'}>
           <div className="eyebrow">YOUR WORKSPACE</div>
-          <h1>{signup ? 'Create your account' : 'Welcome back'}</h1>
+          <h1>
+            {verification ? 'Verify your email' : signup ? 'Create your account' : 'Welcome back'}
+          </h1>
           <p>
-            {signup
-              ? 'Start your own workspace for form workflows.'
-              : 'Sign in to manage your form workflows.'}
+            {verification
+              ? `Enter the 6-digit code sent to ${verification.email}.`
+              : signup
+                ? 'Start your own workspace for form workflows.'
+                : 'Sign in to manage your form workflows.'}
           </p>
-          <form onSubmit={form.handleSubmit((body) => mutation.mutate(body))}>
-            <label htmlFor="email">Email address</label>
-            <input id="email" type="email" autoComplete="username" {...form.register('email')} />
-            {form.formState.errors.email && (
-              <p className="field-error">{form.formState.errors.email.message}</p>
-            )}
-            <label htmlFor="password">Password</label>
-            <input
-              id="password"
-              type="password"
-              autoComplete={signup ? 'new-password' : 'current-password'}
-              aria-describedby={signup ? 'password-help' : undefined}
-              {...form.register('password')}
-            />
-            {form.formState.errors.password && (
-              <p className="field-error">{form.formState.errors.password.message}</p>
-            )}
-            {signup && (
-              <>
-                <p id="password-help" className="auth-hint">
-                  Use at least 12 characters.
+          {verification ? (
+            <form onSubmit={otpForm.handleSubmit((body) => verifyMutation.mutate(body))}>
+              <label htmlFor="email-otp">Email OTP</label>
+              <input
+                id="email-otp"
+                type="text"
+                inputMode="numeric"
+                autoComplete="one-time-code"
+                maxLength={6}
+                {...otpForm.register('code')}
+              />
+              {otpForm.formState.errors.code && (
+                <p className="field-error" role="alert">
+                  {otpForm.formState.errors.code.message}
                 </p>
-                <label htmlFor="confirm-password">Confirm password</label>
-                <input
-                  id="confirm-password"
-                  type="password"
-                  autoComplete="new-password"
-                  {...form.register('confirmPassword')}
-                />
-                {form.formState.errors.confirmPassword && (
-                  <p className="field-error" role="alert">
-                    {form.formState.errors.confirmPassword.message}
-                  </p>
-                )}
-              </>
-            )}
-            {mutation.isError && <ErrorBox error={mutation.error} />}
-            <button className="btn" disabled={mutation.isPending}>
-              {mutation.isPending ? (
-                <Loader2 className="animate-spin" size={18} />
-              ) : (
-                <ArrowRight size={18} />
               )}
-              {mutation.isPending
-                ? signup
-                  ? 'Creating account…'
-                  : 'Signing in…'
-                : signup
-                  ? 'Create account'
-                  : 'Sign in'}
-            </button>
-          </form>
+              <p className="auth-hint">
+                The code is valid for 10 minutes. Check your spam folder too.
+              </p>
+              {new Date(verification.expiresAt).getTime() <= now && (
+                <p className="field-error" role="alert">
+                  This code has expired. Request a new code to continue.
+                </p>
+              )}
+              {verifyMutation.isError && <ErrorBox error={verifyMutation.error} />}
+              {resendMutation.isError && <ErrorBox error={resendMutation.error} />}
+              <button
+                className="btn"
+                disabled={
+                  verifyMutation.isPending ||
+                  resendMutation.isPending ||
+                  new Date(verification.expiresAt).getTime() <= now
+                }
+              >
+                {verifyMutation.isPending ? 'Verifying…' : 'Verify email & create account'}
+              </button>
+              <button
+                type="button"
+                className="btn secondary auth-switch"
+                disabled={now < resendAt || resendMutation.isPending || verifyMutation.isPending}
+                onClick={() => resendMutation.mutate()}
+              >
+                {resendMutation.isPending
+                  ? 'Sending code…'
+                  : now < resendAt
+                    ? `Resend code (${Math.ceil((resendAt - now) / 1000)}s)`
+                    : 'Resend code'}
+              </button>
+              <button
+                type="button"
+                className="btn secondary auth-switch"
+                disabled={resendMutation.isPending || verifyMutation.isPending}
+                onClick={() => {
+                  setVerification(null);
+                  otpForm.reset();
+                  verifyMutation.reset();
+                  resendMutation.reset();
+                  mutation.reset();
+                }}
+              >
+                Change signup details
+              </button>
+            </form>
+          ) : (
+            <form onSubmit={form.handleSubmit((body) => mutation.mutate(body))}>
+              {signup && (
+                <>
+                  <label htmlFor="name">Full name</label>
+                  <input id="name" autoComplete="name" maxLength={100} {...form.register('name')} />
+                  {form.formState.errors.name && (
+                    <p className="field-error">{form.formState.errors.name.message}</p>
+                  )}
+                </>
+              )}
+              <label htmlFor="email">Email address</label>
+              <input id="email" type="email" autoComplete="username" {...form.register('email')} />
+              {form.formState.errors.email && (
+                <p className="field-error">{form.formState.errors.email.message}</p>
+              )}
+              {signup && (
+                <>
+                  <div className="signup-row">
+                    <div>
+                      <label htmlFor="phone-number">Phone number</label>
+                      <input
+                        id="phone-number"
+                        type="tel"
+                        autoComplete="tel"
+                        placeholder="+91 98765 43210"
+                        maxLength={30}
+                        {...form.register('phoneNumber')}
+                      />
+                      {form.formState.errors.phoneNumber && (
+                        <p className="field-error">{form.formState.errors.phoneNumber.message}</p>
+                      )}
+                    </div>
+                    <div>
+                      <label htmlFor="date-of-birth">Date of birth</label>
+                      <input
+                        id="date-of-birth"
+                        type="date"
+                        autoComplete="bday"
+                        max={new Date().toISOString().slice(0, 10)}
+                        {...form.register('dateOfBirth')}
+                      />
+                      {form.formState.errors.dateOfBirth && (
+                        <p className="field-error">{form.formState.errors.dateOfBirth.message}</p>
+                      )}
+                    </div>
+                  </div>
+                  <label htmlFor="address">Address</label>
+                  <textarea
+                    id="address"
+                    autoComplete="street-address"
+                    rows={2}
+                    maxLength={500}
+                    {...form.register('address')}
+                  />
+                  {form.formState.errors.address && (
+                    <p className="field-error">{form.formState.errors.address.message}</p>
+                  )}
+                  <label htmlFor="gender">Gender</label>
+                  <select id="gender" defaultValue="" {...form.register('gender')}>
+                    <option value="" disabled>
+                      Select gender
+                    </option>
+                    {genderOptions.map((gender) => (
+                      <option key={gender} value={gender}>
+                        {gender}
+                      </option>
+                    ))}
+                  </select>
+                  {form.formState.errors.gender && (
+                    <p className="field-error">{form.formState.errors.gender.message}</p>
+                  )}
+                </>
+              )}
+              <label htmlFor="password">Password</label>
+              <input
+                id="password"
+                type="password"
+                autoComplete={signup ? 'new-password' : 'current-password'}
+                aria-describedby={signup ? 'password-help' : undefined}
+                {...form.register('password')}
+              />
+              {form.formState.errors.password && (
+                <p className="field-error">{form.formState.errors.password.message}</p>
+              )}
+              {signup && (
+                <>
+                  <p id="password-help" className="auth-hint">
+                    Use at least 12 characters.
+                  </p>
+                  <label htmlFor="confirm-password">Confirm password</label>
+                  <input
+                    id="confirm-password"
+                    type="password"
+                    autoComplete="new-password"
+                    {...form.register('confirmPassword')}
+                  />
+                  {form.formState.errors.confirmPassword && (
+                    <p className="field-error" role="alert">
+                      {form.formState.errors.confirmPassword.message}
+                    </p>
+                  )}
+                </>
+              )}
+              {mutation.isError && <ErrorBox error={mutation.error} />}
+              <button className="btn" disabled={mutation.isPending}>
+                {mutation.isPending ? (
+                  <Loader2 className="animate-spin" size={18} />
+                ) : (
+                  <ArrowRight size={18} />
+                )}
+                {mutation.isPending
+                  ? signup
+                    ? 'Sending code…'
+                    : 'Signing in…'
+                  : signup
+                    ? 'Send verification code'
+                    : 'Sign in'}
+              </button>
+            </form>
+          )}
           <p className="small-note">{signup ? 'Already have an account?' : 'New to FormFlow?'}</p>
           <Link className="btn secondary auth-switch" href={signup ? '/' : '/signup'}>
             {signup ? 'Sign in' : 'Sign up'}

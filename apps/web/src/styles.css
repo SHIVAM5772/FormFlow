@@ -24,12 +24,14 @@ body {
 }
 button,
 input,
+textarea,
 select {
   font: inherit;
 }
 button,
 a,
 input,
+textarea,
 select {
   touch-action: manipulation;
 }
@@ -54,6 +56,7 @@ a:hover {
 button:focus-visible,
 a:focus-visible,
 input:focus-visible,
+textarea:focus-visible,
 select:focus-visible,
 [role='button']:focus-visible {
   outline: 3px solid #2db6a9;
@@ -94,6 +97,7 @@ button {
   color: inherit;
 }
 input,
+textarea,
 select {
   width: 100%;
   background: var(--surface);
@@ -102,6 +106,9 @@ select {
   border-radius: 8px;
   padding: 12px 14px;
   font-size: 13px;
+}
+textarea {
+  resize: vertical;
 }
 input::placeholder {
   color: #9aa8a8;
@@ -1237,10 +1244,30 @@ dd {
   width: 100%;
   margin-top: 10px;
 }
+.login-card form > .auth-switch {
+  margin-top: 10px;
+}
 .auth-hint {
   color: var(--muted);
   font-size: 12px;
   margin: 8px 0 16px;
+}
+.signup-card {
+  max-width: 460px;
+}
+.signup-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+  gap: 16px;
+}
+.signup-row > div {
+  min-width: 0;
+}
+@media (max-width: 480px) {
+  .signup-row {
+    grid-template-columns: 1fr;
+    gap: 0;
+  }
 }
 .scrim {
   display: none;
@@ -1277,6 +1304,7 @@ dd {
   background: #cfddc9;
 }
 .dark input,
+.dark textarea,
 .dark select {
   border-color: var(--line);
 }

@@ -4,9 +4,10 @@ import { sampleForm, sampleAnswers } from './helpers.js';
 import { columns } from '../packages/shared/src/index.js';
 import { generateTemplate } from '../packages/excel-engine/src/index.js';
 import ExcelJS from 'exceljs';
-import bcrypt from 'bcryptjs';
-import { Prisma } from '../packages/database/generated/client/index.js';
 const mocks = vi.hoisted(() => ({
+  signupRequest: vi.fn(),
+  signupVerify: vi.fn(),
+  signupResend: vi.fn(),
   findUnique: vi.fn(),
   createUser: vi.fn(),
   findFirst: vi.fn(),
@@ -16,6 +17,7 @@ const mocks = vi.hoisted(() => ({
   ping: vi.fn(),
   disconnect: vi.fn(),
   template: vi.fn(),
+  createTemplate: vi.fn(),
   upload: vi.fn(),
   job: vi.fn(),
   record: vi.fn(),
@@ -23,13 +25,27 @@ const mocks = vi.hoisted(() => ({
   updateJob: vi.fn(),
   transaction: vi.fn(),
 }));
+vi.mock('../apps/api/src/signup.js', () => ({
+  requestSignup: mocks.signupRequest,
+  verifySignup: mocks.signupVerify,
+  resendSignup: mocks.signupResend,
+  SignupError: class extends Error {
+    constructor(
+      public status: number,
+      message: string,
+      public code: string,
+    ) {
+      super(message);
+    }
+  },
+}));
 vi.mock('../packages/database/src/index.js', () => ({
   db: {
     user: { findUnique: mocks.findUnique, create: mocks.createUser },
     form: { findFirst: mocks.findFirst },
     auditLog: { create: mocks.audit },
     $runCommandRaw: mocks.raw,
-    excelTemplate: { findFirst: mocks.template },
+    excelTemplate: { findFirst: mocks.template, create: mocks.createTemplate },
     upload: { upsert: mocks.upload },
     submissionJob: { findFirst: mocks.job, updateMany: mocks.updateJob },
     submissionRecord: { findFirst: mocks.record, updateMany: mocks.updateRecord },
@@ -77,64 +93,53 @@ beforeEach(() => {
     sessionVersion: 0,
   });
 });
-it('creates a normalized account with a hashed password and an authenticated session', async () => {
-  const password = 'a-long-test-password';
+it('starts signup without issuing a session or creating a user', async () => {
+  mocks.signupRequest.mockResolvedValue({
+    email: 'test@example.com',
+    verificationId: 'pending-id',
+    expiresAt: new Date().toISOString(),
+    resendAfterSeconds: 60,
+  });
   const res = await request
     .post('/api/auth/signup')
     .set('Origin', 'http://localhost:3000')
-    .send({ email: '  TEST@Example.com  ', password });
-  expect(res.status).toBe(201);
-  const stored = mocks.createUser.mock.calls[0][0].data;
-  expect(stored.email).toBe('test@example.com');
-  expect(stored.passwordHash).not.toBe(password);
-  expect(await bcrypt.compare(password, stored.passwordHash)).toBe(true);
-  expect(res.body.data).toEqual({
+    .send({ email: 'test@example.com' });
+  expect(res.status).toBe(202);
+  expect(res.body.data.verificationId).toBe('pending-id');
+  expect(res.headers['set-cookie']).toBeUndefined();
+  expect(mocks.createUser).not.toHaveBeenCalled();
+});
+it('only issues an authenticated session after OTP verification succeeds', async () => {
+  mocks.signupVerify.mockResolvedValue({
     id: '7926ad27-2a8b-487a-adf1-010723b037a3',
     email: 'test@example.com',
+    sessionVersion: 0,
   });
-  expect(JSON.stringify(res.body)).not.toContain('password');
+  const body = { email: 'test@example.com', verificationId: 'pending-id', code: '123456' };
+  const res = await request
+    .post('/api/auth/signup/verify')
+    .set('Origin', 'http://localhost:3000')
+    .send(body);
+  expect(res.status).toBe(201);
+  expect(mocks.signupVerify).toHaveBeenCalledWith(body);
   const cookie = res.headers['set-cookie'][0];
   expect(cookie).toContain('HttpOnly');
   expect(cookie).toContain('SameSite=Lax');
   expect((await request.get('/api/auth/me').set('Cookie', cookie)).status).toBe(200);
 });
-it.each([
-  { email: 'invalid', password: 'a-long-test-password' },
-  { email: 'test@example.com', password: 'short' },
-  { email: 'test@example.com', password: '🙂'.repeat(19) },
-])(
-  'rejects invalid signup credentials without creating an account: $email / $password',
-  async (body) => {
-    const res = await request
-      .post('/api/auth/signup')
-      .set('Origin', 'http://localhost:3000')
-      .send(body);
-    expect(res.status).toBe(400);
-    expect(mocks.createUser).not.toHaveBeenCalled();
-  },
-);
-it('handles concurrent duplicate email creation without overwriting the existing account', async () => {
-  mocks.createUser.mockRejectedValueOnce(
-    new Prisma.PrismaClientKnownRequestError('Duplicate', {
-      code: 'P2002',
-      clientVersion: '6.19.0',
-    }),
-  );
+it('resends a code without authenticating the browser', async () => {
+  mocks.signupResend.mockResolvedValue({ email: 'test@example.com', verificationId: 'new-id' });
   const res = await request
-    .post('/api/auth/signup')
+    .post('/api/auth/signup/resend')
     .set('Origin', 'http://localhost:3000')
-    .send({ email: 'test@example.com', password: 'a-long-test-password' });
-  expect(res.status).toBe(409);
-  expect(res.body.error.code).toBe('EMAIL_EXISTS');
+    .send({});
+  expect(res.status).toBe(202);
   expect(res.headers['set-cookie']).toBeUndefined();
 });
-it('rejects signup from another origin before creating an account', async () => {
-  const res = await request
-    .post('/api/auth/signup')
-    .set('Origin', 'https://evil.test')
-    .send({ email: 'test@example.com', password: 'a-long-test-password' });
+it('rejects signup mutations from another origin before sending email', async () => {
+  const res = await request.post('/api/auth/signup').set('Origin', 'https://evil.test').send({});
   expect(res.status).toBe(403);
-  expect(mocks.createUser).not.toHaveBeenCalled();
+  expect(mocks.signupRequest).not.toHaveBeenCalled();
 });
 it('exposes liveness without authentication', async () => {
   const res = await request.get('/api/health');
@@ -186,6 +191,39 @@ it('validates input and requires explicit submission authorization', async () =>
     .send({ uploadId: 'bad', authorized: false });
   expect(res.status).toBe(400);
   expect(res.body.error.code).toBe('VALIDATION_ERROR');
+});
+it('downloads dropdown validation with the analyzed form choices through the template endpoint', async () => {
+  const definition = sampleForm();
+  const templateId = '6926ad27-2a8b-487a-adf1-010723b037a3';
+  mocks.findFirst.mockResolvedValue({
+    id: '9926ad27-2a8b-487a-adf1-010723b037a3',
+    schemas: [{ id: 'schema', definition }],
+  });
+  mocks.createTemplate.mockResolvedValue({ id: templateId });
+  const response = await request
+    .get('/api/forms/9926ad27-2a8b-487a-adf1-010723b037a3/template')
+    .set('Cookie', `session=${token}`)
+    .buffer(true)
+    .parse((res, callback) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk: Buffer) => chunks.push(chunk));
+      res.on('end', () => callback(null, Buffer.concat(chunks)));
+      res.on('error', callback);
+    });
+  expect(response.status).toBe(200);
+  expect(response.headers['content-type']).toContain('spreadsheetml.sheet');
+  expect(response.headers['x-template-id']).toBe(templateId);
+  const workbook = new ExcelJS.Workbook();
+  await workbook.xlsx.load(response.body);
+  const validation = workbook.getWorksheet('Responses')!.getCell('C2').dataValidation;
+  expect(validation.type).toBe('list');
+  expect(workbook.definedNames.getRanges(String(validation.formulae![0])).ranges).toHaveLength(1);
+  const reference = workbook.getWorksheet('Validation Reference')!;
+  const options: string[] = [];
+  reference.eachRow((row) => {
+    if (row.getCell(1).text === columns(definition)[2].heading) options.push(row.getCell(2).text);
+  });
+  expect(options).toEqual(['Engineering', 'Operations']);
 });
 it('refuses to generate an empty Excel template when no questions are accessible', async () => {
   const definition = sampleForm();

@@ -5,6 +5,10 @@ if (!Number.isInteger(days) || days < 1)
   throw new Error('RETENTION_DAYS must be a positive integer');
 const cutoff = new Date(Date.now() - days * 86400000);
 try {
+  // Retain recent send counters long enough to preserve the per-email rate limit.
+  await db.signupVerification.deleteMany({
+    where: { expiresAt: { lt: new Date(Date.now() - 15 * 60000) } },
+  });
   const result = await db.upload.deleteMany({
     where: {
       createdAt: { lt: cutoff },

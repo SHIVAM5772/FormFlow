@@ -9,7 +9,142 @@ import {
   verifyZipExpansion,
 } from '../packages/excel-engine/src/index.js';
 import { columns, questionSchema } from '../packages/shared/src/index.js';
+import { normalizeGoogleApi, normalizePublic } from '../packages/form-analyzer/src/normalize.js';
 const templateId = '7926ad27-2a8b-487a-adf1-010723b037a3';
+it('marks checkbox and checkbox-grid cells for the add-in while allowing combined answers', async () => {
+  const form = sampleForm();
+  const book = new ExcelJS.Workbook();
+  await book.xlsx.load((await generateTemplate(form, templateId, 10)) as any);
+  const sheet = book.getWorksheet('Responses')!;
+  for (const address of ['E2', 'K2']) {
+    const cell = sheet.getCell(address);
+    expect(cell.dataValidation.type).toBe('list');
+    expect(cell.dataValidation.formulae![0]).toMatch(/^FormFlowMulti_/);
+    expect(cell.dataValidation.showErrorMessage).not.toBe(true);
+    expect(cell.dataValidation.prompt).toContain('checkbox menu');
+    expect(sheet.getCell(11, cell.col).dataValidation).toEqual(cell.dataValidation);
+    const ranges = book.definedNames.getRanges(String(cell.dataValidation.formulae![0])).ranges;
+    expect(ranges).toHaveLength(1);
+    expect(ranges[0]).toContain('Validation Reference');
+  }
+  expect(sheet.getCell('C2').dataValidation.showErrorMessage).toBe(true);
+  sheet.getRow(2).values = columns(form).map((c) => sampleAnswers[c.key as keyof typeof sampleAnswers]);
+  const result = await parseUpload(
+    Buffer.from(await book.xlsx.writeBuffer()),
+    form,
+    templateId,
+    10,
+  );
+  expect(result.valid).toBe(1);
+  expect(result.rows[0].answers.skills).toBe('TypeScript; Excel');
+  expect(result.rows[0].answers['checks::First']).toBe('A; B');
+  sheet.getCell('E2').value = 'TypeScript; Unknown';
+  const invalid = await parseUpload(
+    Buffer.from(await book.xlsx.writeBuffer()),
+    form,
+    templateId,
+    10,
+  );
+  expect(invalid.invalid).toBe(1);
+});
+it('does not offer add-in lists when checkbox labels contain the answer separator', async () => {
+  const form = sampleForm();
+  form.questions.find((q) => q.id === 'skills')!.options = ['A; B', 'C'];
+  const book = new ExcelJS.Workbook();
+  await book.xlsx.load((await generateTemplate(form, templateId, 10)) as any);
+  expect(book.getWorksheet('Responses')!.getCell('E2').dataValidation).toBeUndefined();
+});
+it('preserves analyzed dropdown options as named Excel lists across every allowed response row', async () => {
+  const options = [
+    'Delhi, NCR',
+    'Option "quoted"',
+    'मुंबई',
+    ...Array.from({ length: 40 }, (_, i) => `Choice ${i + 1} with a longer label`),
+  ];
+  const form = normalizeGoogleApi(
+    {
+      info: { title: 'Dropdown compatibility' },
+      items: [
+        {
+          itemId: 'region',
+          title: 'Region',
+          questionItem: {
+            question: {
+              questionId: 'q-region',
+              required: true,
+              choiceQuestion: { type: 'DROP_DOWN', options: options.map((value) => ({ value })) },
+            },
+          },
+        },
+        {
+          itemId: 'optional',
+          title: 'Optional region',
+          questionItem: {
+            question: {
+              questionId: 'q-optional',
+              choiceQuestion: {
+                type: 'DROP_DOWN',
+                options: [{ value: 'North' }, { value: 'South' }],
+              },
+            },
+          },
+        },
+      ],
+    },
+    'https://docs.google.com/forms/d/e/test/viewform',
+  );
+  const book = new ExcelJS.Workbook();
+  await book.xlsx.load((await generateTemplate(form, templateId, 2000)) as any);
+  const sheet = book.getWorksheet('Responses')!;
+  const validation = sheet.getCell('A2').dataValidation;
+  expect(validation.type).toBe('list');
+  expect(validation.allowBlank).not.toBe(true);
+  expect(validation.showInputMessage).toBe(true);
+  expect(sheet.getCell('A1000').dataValidation).toEqual(validation);
+  expect(sheet.getCell('A2001').dataValidation).toEqual(validation);
+  expect(sheet.getCell('A2002').dataValidation).toBeUndefined();
+  const name = String(validation.formulae![0]);
+  expect(name).toMatch(/^FormFlowChoices_/);
+  expect(book.definedNames.getRanges(name).ranges).toEqual([
+    `'Validation Reference'!$B$2:$B$${options.length + 1}`,
+  ]);
+  const reference = book.getWorksheet('Validation Reference')!;
+  expect(options.map((_, i) => reference.getCell(`B${i + 2}`).text)).toEqual(options);
+  expect(sheet.getCell('B2').dataValidation.allowBlank).toBe(true);
+  expect(sheet.getCell('B2').dataValidation.formulae).not.toEqual(validation.formulae);
+});
+it('carries public Google Form dropdown metadata into the downloaded Excel template', async () => {
+  const form = normalizePublic(
+    [
+      null,
+      [
+        'Description',
+        [[123, 'Department', null, 3, [[456, [['Engineering'], ['Operations']], 1]]]],
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        'Registration',
+      ],
+    ],
+    'https://docs.google.com/forms/d/e/test/viewform',
+  );
+  expect(form.questions[0]).toMatchObject({
+    type: 'DROPDOWN',
+    options: ['Engineering', 'Operations'],
+  });
+  const book = new ExcelJS.Workbook();
+  await book.xlsx.load((await generateTemplate(form, templateId, 5)) as any);
+  const validation = book.getWorksheet('Responses')!.getCell('A2').dataValidation;
+  expect(validation.type).toBe('list');
+  expect(book.definedNames.getRanges(String(validation.formulae![0])).ranges).toEqual([
+    "'Validation Reference'!$B$2:$B$3",
+  ]);
+  expect(book.getWorksheet('Validation Reference')!.getCell('B2').text).toBe('Engineering');
+  expect(book.getWorksheet('Validation Reference')!.getCell('B3').text).toBe('Operations');
+});
 it('generates all four sheets and parses a filled workbook preserving identifiers', async () => {
   const form = sampleForm();
   const book = new ExcelJS.Workbook();

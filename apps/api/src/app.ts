@@ -31,6 +31,7 @@ import {
 import { config, webOrigins } from './config.js';
 import { cookieOptions, requireAuth, sameOrigin, signSession } from './auth.js';
 import { google, googleAccess } from './google.js';
+import { requestSignup, resendSignup, verifySignup, SignupError } from './signup.js';
 
 export const logger = pino({
   redact: [
@@ -140,43 +141,31 @@ export function createApp() {
     }),
   );
   app.use('/api', sameOrigin);
+  const signupLimit = rateLimit({
+    windowMs: 900000,
+    limit: 20,
+    standardHeaders: 'draft-7',
+    legacyHeaders: false,
+  });
   app.post(
     '/api/auth/signup',
-    rateLimit({ windowMs: 900000, limit: 10, standardHeaders: 'draft-7', legacyHeaders: false }),
+    signupLimit,
     asyncRoute(async (req, res) => {
-      const body = z
-        .object({
-          email: z
-            .string()
-            .trim()
-            .email()
-            .max(191)
-            .transform((value) => value.toLowerCase()),
-          password: z
-            .string()
-            .min(12)
-            .max(72)
-            .refine(
-              (value) => Buffer.byteLength(value, 'utf8') <= 72,
-              'Password must fit within 72 UTF-8 bytes',
-            ),
-        })
-        .parse(req.body);
-      let user;
-      try {
-        user = await db.user.create({
-          data: { email: body.email, passwordHash: await bcrypt.hash(body.password, 12) },
-        });
-      } catch (error) {
-        if (error instanceof Prisma.PrismaClientKnownRequestError && error.code === 'P2002')
-          throw new HttpError(
-            409,
-            'An account with this email already exists. Please sign in.',
-            'EMAIL_EXISTS',
-          );
-        throw error;
-      }
-      await audit(user.id, 'SIGNUP');
+      res.status(202).json({ data: await requestSignup(req.body) });
+    }),
+  );
+  app.post(
+    '/api/auth/signup/resend',
+    signupLimit,
+    asyncRoute(async (req, res) => {
+      res.status(202).json({ data: await resendSignup(req.body) });
+    }),
+  );
+  app.post(
+    '/api/auth/signup/verify',
+    signupLimit,
+    asyncRoute(async (req, res) => {
+      const user = await verifySignup(req.body);
       const token = await signSession(user.id, user.sessionVersion);
       res.cookie('session', token, { ...cookieOptions, maxAge: 8 * 3600000 });
       res.status(201).json({ data: { id: user.id, email: user.email } });
@@ -752,7 +741,7 @@ export function createApp() {
       });
       return;
     }
-    if (error instanceof HttpError) {
+    if (error instanceof HttpError || error instanceof SignupError) {
       res.status(error.status).json({ error: { code: error.code, message: error.message } });
       return;
     }

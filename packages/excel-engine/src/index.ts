@@ -104,20 +104,37 @@ export async function generateTemplate(form: FormDefinition, templateId: string,
     };
     header.font = { color: { argb: 'FFFFFFFF' }, bold: true };
     header.note = `${c.q.required ? 'Required' : 'Optional'} · ${c.q.type}${c.q.other ? ' · Other: your answer' : ''}`;
+    const multiSelect =
+      ['CHECKBOXES', 'CHECKBOX_GRID'].includes(c.q.type) &&
+      c.q.options.length > 0 &&
+      !c.q.options.some((option) => option.includes(';'));
     if (
-      ['DROPDOWN', 'MULTIPLE_CHOICE', 'MULTIPLE_CHOICE_GRID', 'LINEAR_SCALE'].includes(c.q.type) &&
-      !c.q.other &&
-      c.q.options.length
+      multiSelect ||
+      (['DROPDOWN', 'MULTIPLE_CHOICE', 'MULTIPLE_CHOICE_GRID', 'LINEAR_SCALE'].includes(c.q.type) &&
+        !c.q.other &&
+        c.q.options.length)
     ) {
+      // Workbook-scoped names keep lists on another sheet compatible with Excel.
+      // A cell range also preserves commas, quotes and long option lists verbatim.
+      const listName = `${multiSelect ? 'FormFlowMulti' : 'FormFlowChoices'}_${index + 1}`;
+      book.definedNames.add(ranges.get(c.key)!, listName);
       (sheet as any).dataValidations.add(`${col.letter}2:${col.letter}${maxRows + 1}`, {
         type: 'list',
         allowBlank: !c.q.required,
-        formulae: [ranges.get(c.key)!],
-        showErrorMessage: true,
+        formulae: [listName],
+        showInputMessage: true,
+        promptTitle: multiSelect ? 'Choose multiple options' : 'Choose an option',
+        prompt: multiSelect
+          ? 'With the FormFlow Excel add-in, double-click for a checkbox menu or use the dropdown to toggle choices. Otherwise separate choices with semicolons.'
+          : 'Select this response cell, then use its drop-down arrow to choose a value.',
+        showErrorMessage: !multiSelect,
         errorTitle: 'Invalid value',
         error: 'Select an allowed value',
         errorStyle: 'stop',
       });
+      if (multiSelect)
+        header.note +=
+          '\nFormFlow add-in: double-click for a checkbox menu. Without the add-in, separate selected labels with semicolons.';
     }
   });
   sheet.autoFilter = {
@@ -143,8 +160,12 @@ export async function generateTemplate(form: FormDefinition, templateId: string,
       'All response columns use text format, preserving leading zeroes in phone numbers and IDs.',
     ],
     [
+      'Dropdowns',
+      'On Responses, select a dropdown or single-choice cell in row 2 onward and click its drop-down arrow. Choices match the analyzed form. The arrow appears when the cell is selected.',
+    ],
+    [
       'Checkboxes',
-      'Separate exact option labels with semicolons: Option A; Option B. Option labels containing semicolons require manual handling.',
+      'With the FormFlow desktop Excel add-in, double-click a checkbox response cell for a tick menu, or choose dropdown items one by one to toggle them. Without the add-in, enter exact labels separated by semicolons: Option A; Option B. Save and upload this .xlsx file; do not embed macros. Labels containing semicolons require manual handling.',
     ],
     ['Other responses', 'If offered, use Other: your text.'],
     ['Grids', 'Each grid row has its own response column. Checkbox grids use semicolons.'],

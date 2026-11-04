@@ -21,7 +21,11 @@ Open the URL printed by Vercel. The local API service starts the API and MongoDB
 
 Keep SESSION_SECRET and DATA_KEY stable. MongoDB must support replica-set transactions; Atlas supplies this. Database credentials stay on the server. MongoDB uses db push rather than SQL migrations.
 
-New users can choose **Sign up** on the sign-in screen or visit `/signup`. Enter an email and a password of at least 12 characters, then confirm the password. A successful signup signs the user into their own workspace. The account creation command remains available for administrators.
+New users can choose **Sign up** on the sign-in screen or visit `/signup`. Enter your full name, email, phone number, address, date of birth and gender, then set and confirm a password of at least 12 characters. Signup sends a six-digit email OTP; only successful verification creates an account and signs the user into their workspace. The account creation command remains available for administrators.
+
+## Excel checkbox selections
+
+New Excel templates include checkbox option lists compatible with the optional Windows desktop [FormFlow multi-select add-in](excel-addin/README.md). With the add-in loaded, double-click a checkbox cell for a tick menu, or choose dropdown options one by one to toggle them in the same cell. The response file stays `.xlsx`. Without the add-in, separate exact choice labels with semicolons. The add-in source and build/setup instructions are local; no prebuilt binary is included.
 
 ## Production
 
@@ -44,3 +48,11 @@ The checked-in schedule runs daily at 00:00 UTC (05:30 IST, subject to Hobby tim
 - `npm run retention`: remove expired records.
 
 Google OAuth is optional. CAPTCHA, login restrictions and unsupported form rules require manual action. Responses are submitted only after explicit batch authorization. Tests use included local fixtures.
+
+## Local signup email setup
+
+Configure SMTP_HOST, SMTP_PORT, SMTP_SECURE, SMTP_USER, SMTP_PASSWORD and MAIL_FROM in your local .env using your email provider's SMTP settings. For port 587 use SMTP_SECURE=false (STARTTLS); for port 465 use SMTP_SECURE=true. Keep credentials out of Git. See [Nodemailer SMTP settings](https://nodemailer.com/smtp). Restart the local API after changing environment values. Missing or failed email configuration prevents signup and displays an error; codes are never exposed through API responses or logs.
+
+Run npm run db:generate after schema changes. Use an isolated development MongoDB database for local signup testing. This change adds no database indexes: pending challenges use the email as MongoDB's native unique document ID. Do not run deployment commands or database updates against production as part of local setup.
+
+Codes expire after 10 minutes and allow five verification attempts. Resends wait 60 seconds, are limited to five emails per address per 15 minutes, and replace earlier codes. Signup details are temporarily encrypted; passwords are hashed before storage. Verification consumes the code and creates the account in one database transaction. The retention command removes expired pending signup records. Existing accounts retain their current sign-in flow.
