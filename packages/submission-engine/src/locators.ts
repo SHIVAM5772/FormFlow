@@ -1,5 +1,5 @@
 import type { Locator, Page } from 'playwright';
-import type { Question } from '../../shared/src/index.js';
+import { questionTitle, type Question } from '../../shared/src/index.js';
 
 export class ManualAction extends Error {}
 
@@ -14,14 +14,14 @@ export function questionIdentity(raw: string | null) {
       if (
         !Array.isArray(question) ||
         !['number', 'string'].includes(typeof question[0]) ||
-        typeof question[1] !== 'string' ||
+        (question[1] != null && typeof question[1] !== 'string') ||
         typeof question[3] !== 'number' ||
         !Array.isArray(question[4])
       )
         continue;
       return {
         id: String(question[0]),
-        title: question[1],
+        title: String(question[1] ?? ''),
         entryIds: question[4].map((entry: unknown[]) => String(entry?.[0])),
       };
     } catch {
@@ -57,7 +57,8 @@ export async function locateQuestion(page: Page, q: Question, fixture = false): 
       identity!.title === q.title && q.entryIds.every((id) => identity!.entryIds.includes(id)),
   );
   if (identified.length === 1 && matched.length === 1) return items.nth(matched[0].index);
-  if (identified.length) throw new ManualAction(`Cannot reliably locate question: ${q.title}`);
+  if (identified.length || !q.title.trim())
+    throw new ManualAction(`Cannot reliably locate question: ${questionTitle(q)}`);
   // Required markers can have aria-label="Required question", changing the accessible name.
   const heading = page.getByRole('heading', {
     name: new RegExp(`^${escape(q.title)}(?:\\s*(?:\\*|Required question))?\\s*$`),

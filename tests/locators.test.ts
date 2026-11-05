@@ -18,6 +18,37 @@ const q = questionSchema.parse({
   sectionId: 'section-1',
   entryIds: ['456'],
 });
+it.each(['', null])(
+  'maps an untitled checkbox with metadata title=%s by question and entry IDs',
+  async (title) => {
+    const page = await browser.newPage();
+    try {
+      const untitled = { ...q, title: '', type: 'CHECKBOXES' as const, options: ['Option 1'] };
+      const tuple = (id: number, entry: number) =>
+        `%.@.${JSON.stringify([id, title, null, 4, [[entry]]])}`;
+      await page.setContent(
+        `<div role="listitem" data-params='${tuple(999, 888)}'><input type="checkbox" aria-label="Wrong"></div><div role="listitem" data-params='${tuple(123, 456)}'><input type="checkbox" aria-label="Option 1"></div>`,
+      );
+      const root = await locateQuestion(page, untitled);
+      await root.getByRole('checkbox', { name: 'Option 1', exact: true }).check();
+      expect(await root.getByRole('checkbox').isChecked()).toBe(true);
+      expect(await page.getByRole('checkbox', { name: 'Wrong' }).isChecked()).toBe(false);
+    } finally {
+      await page.close();
+    }
+  },
+);
+it('does not map an untitled question from an empty heading without stable metadata', async () => {
+  const page = await browser.newPage();
+  try {
+    await page.setContent('<div role="listitem"><div role="heading"></div><input></div>');
+    await expect(locateQuestion(page, { ...q, title: '' })).rejects.toThrow(
+      'Cannot reliably locate question: Untitled question (123)',
+    );
+  } finally {
+    await page.close();
+  }
+});
 it('parses known Google tuple encodings without evaluating expressions', () => {
   for (const raw of [
     '%.@.[123,"Name",null,0,[[456,null,true]]],"heading"]',

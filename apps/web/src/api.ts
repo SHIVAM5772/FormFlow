@@ -15,7 +15,10 @@ export async function download(path: string, name: string) {
     const url = URL.createObjectURL(response.data);
     const link = document.createElement('a');
     link.href = url;
-    link.download = name;
+    const serverName = /filename="([^"\r\n]+)"/i.exec(
+      response.headers['content-disposition'] ?? '',
+    )?.[1];
+    link.download = serverName?.split(/[\\/]/).pop() || name;
     link.click();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
     return response.headers['x-template-id'] as string | undefined;

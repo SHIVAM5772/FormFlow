@@ -1,5 +1,9 @@
 # FormFlow same-cell multi-select add-in
 
+**New downloads already include multi-select:** forms with checkbox fields download as `.xlsm` containing the VBA. Open in desktop Excel, enable its macros if permitted, and choose dropdown options to add/remove them in the same cell. Save and upload the `.xlsm`. No add-in installation is required. The steps below apply to older `.xlsx` templates.
+
+To rebuild the embedded project, run `npm run build:excel-macros`. `build-embedded.mjs` reads the XlsxWriter public example's project metadata from `vba-base.bin` (SHA-256 `0ced1464b3677e98f5e3a8c5d80135e18dc98dca39299f1a8cfd2a00999fbf9f`), replaces every source module, and writes a source-only project without performance caches. Upstream: https://github.com/jmcnamara/XlsxWriter/blob/main/examples/vbaProject.bin; license: `VBA-BASE-LICENSE.txt`. Excel compiles the embedded source when macros are enabled. Runtime servers only read the built binary; Excel and build dependencies are not needed there.
+
 For Windows desktop Excel. The add-in keeps macros in a separate `.xlam`; response workbooks stay `.xlsx` and work with the existing FormFlow upload. Excel Web cannot run this VBA add-in.
 
 ## Build once in Excel
@@ -39,4 +43,4 @@ The repository tests verify generated named lists, checkbox/grid markers, combin
 4. Clear selections and apply; the cell must become empty.
 5. Verify a normal single-choice dropdown still replaces its value, then save `.xlsx` and upload for preview.
 
-The development machine blocks programmatic VBA access and its UI automation runtime is unavailable, so this source package has not yet been compiled or interactively verified in Excel. No prebuilt `.xlam` is included.
+The embedded `.xlsm` project has been compiled and tested in desktop Excel: adding/removing values in one cell, single-choice replacement, and saving the workbook all passed. The separate legacy `.xlam` build remains optional; no prebuilt `.xlam` is included.

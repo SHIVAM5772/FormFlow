@@ -14,6 +14,7 @@ import { db, encrypt, decrypt } from '../../../packages/database/src/index.js';
 import { FormAnalyzer } from '../../../packages/form-analyzer/src/index.js';
 import {
   generateTemplate,
+  templateFileType,
   parseUpload,
   reportWorkbook,
 } from '../../../packages/excel-engine/src/index.js';
@@ -94,8 +95,8 @@ const upload = multer({
   storage: multer.memoryStorage(),
   limits: { fileSize: config.MAX_UPLOAD_MB * 1024 * 1024, files: 1, fields: 1, parts: 2 },
   fileFilter: (_req, file, cb) => {
-    if (!file.originalname.toLowerCase().endsWith('.xlsx'))
-      cb(new HttpError(400, 'Only XLSX files are accepted'));
+    if (!/\.(xlsx|xlsm)$/i.test(file.originalname))
+      cb(new HttpError(400, 'Only XLSX or XLSM files are accepted'));
     else cb(null, true);
   },
 });
@@ -376,11 +377,12 @@ export function createApp() {
         );
       const template = await db.excelTemplate.create({ data: { schemaId: schema.id } });
       const buffer = await generateTemplate(definition, template.id, config.MAX_ROWS);
+      const fileType = templateFileType(definition);
       await audit(uid(res), 'TEMPLATE_GENERATED', template.id);
       res
         .set({
-          'Content-Type': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
-          'Content-Disposition': `attachment; filename="formflow-${template.id}.xlsx"`,
+          'Content-Type': fileType.contentType,
+          'Content-Disposition': `attachment; filename="formflow-${template.id}.${fileType.extension}"`,
           'X-Template-Id': template.id,
         })
         .send(buffer);
@@ -391,7 +393,7 @@ export function createApp() {
     upload.single('file'),
     asyncRoute(async (req, res) => {
       const templateId = id.parse(req.body.templateId);
-      if (!req.file) throw new HttpError(400, 'Select an XLSX file');
+      if (!req.file) throw new HttpError(400, 'Select an XLSX or XLSM file');
       const template = await db.excelTemplate.findFirst({
         where: { id: templateId, schema: { form: { userId: uid(res) } } },
         include: {

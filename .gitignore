@@ -10,7 +10,9 @@ playwright-report/
 *.log
 *.xlsx
 *.xlam
+*.xlsm
 excel-addin/FormFlowMultiSelect-setup.zip
+excel-addin/.verification/
 !tests/fixtures/*.xlsx
 
 .next/

@@ -1,6 +1,6 @@
 import { it, expect } from 'vitest';
 import { normalizePublic, normalizeGoogleApi } from '../packages/form-analyzer/src/normalize.js';
-import { activeSections } from '../packages/shared/src/index.js';
+import { activeSections, columns } from '../packages/shared/src/index.js';
 
 function emailMetadata(rules: unknown) {
   return [
@@ -18,6 +18,35 @@ function emailMetadata(rules: unknown) {
     ],
   ];
 }
+it.each(['', null])(
+  'supports an untitled checkbox question with title=%s using its stable IDs',
+  (title) => {
+    const data = emailMetadata(null) as any;
+    data[1][1] = [[257571857, title, null, 4, [[987, [['Option 1'], ['Option 2']], 1]]]];
+    const form = normalizePublic(data, 'https://docs.google.com/forms/d/e/test/viewform');
+    expect(form.blockers).toEqual([]);
+    expect(form.questions[0]).toMatchObject({
+      id: '257571857',
+      title: '',
+      type: 'CHECKBOXES',
+      entryIds: ['987'],
+    });
+    expect(columns(form)[0].heading).toBe('Untitled question (257571857) *');
+  },
+);
+it('still blocks untitled questions with unknown types or missing entry IDs', () => {
+  for (const [type, entryId] of [
+    [99, 987],
+    [4, null],
+  ]) {
+    const data = emailMetadata(null) as any;
+    data[1][1] = [[257571857, '', null, type, [[entryId, [['Option 1']], 0]]]];
+    const form = normalizePublic(data, 'https://docs.google.com/forms/d/e/test/viewform');
+    expect(form.blockers).toContain(
+      'Unsupported or incomplete question: Untitled question (257571857)',
+    );
+  }
+});
 it('extracts the custom confirmation text from public settings', () => {
   const data = emailMetadata(null) as any;
   data[1][2] = ['Thanks for submitting your contact info!', 0, 0, 1, 0];

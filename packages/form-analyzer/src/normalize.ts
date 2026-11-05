@@ -1,5 +1,10 @@
 import { createHash } from 'node:crypto';
-import { formSchema, type FormDefinition, type Question } from '../../shared/src/index.js';
+import {
+  formSchema,
+  questionTitle,
+  type FormDefinition,
+  type Question,
+} from '../../shared/src/index.js';
 
 export function fingerprint(form: Omit<FormDefinition, 'fingerprint'>) {
   return createHash('sha256')
@@ -107,7 +112,7 @@ export function normalizePublic(data: any, sourceUrl: string): FormDefinition {
     let type = publicTypes[item[3]] ?? 'UNSUPPORTED';
     if (item[3] === 7 && entries[0]?.[11]?.[0]) type = 'CHECKBOX_GRID';
     const options = (entries[0]?.[1] ?? [])
-      .filter((o: any) => Array.isArray(o) && o[0] !== null)
+      .filter((o: any) => Array.isArray(o) && o[0] != null && o[4] !== 1)
       .map((o: any) => String(o[0]));
     const q: Question = {
       id: String(item[0]),
@@ -151,8 +156,19 @@ export function normalizePublic(data: any, sourceUrl: string): FormDefinition {
       result.blockers.push(
         `Conditional navigation metadata requires owner API analysis: ${q.title}`,
       );
-    if (type === 'UNSUPPORTED' || type === 'FILE_UPLOAD' || !q.title || q.rows.some((r) => !r))
-      result.blockers.push(`Unsupported or incomplete question: ${q.title}`);
+    // Google permits untitled questions. Keep their raw title for DOM identity
+    // matching; the question and entry IDs provide the stable mapping.
+    const reliableId = (value: unknown) =>
+      (typeof value === 'number' && Number.isFinite(value)) ||
+      (typeof value === 'string' && value.trim().length > 0);
+    if (
+      type === 'UNSUPPORTED' ||
+      type === 'FILE_UPLOAD' ||
+      q.rows.some((r) => !r) ||
+      !reliableId(item[0]) ||
+      entries.some((entry: any) => !Array.isArray(entry) || !reliableId(entry[0]))
+    )
+      result.blockers.push(`Unsupported or incomplete question: ${questionTitle(q)}`);
     result.questions.push(q);
   }
   if (result.sections.length > 1)
@@ -190,7 +206,9 @@ export function normalizeGoogleApi(data: any, sourceUrl: string): FormDefinition
       description: item.description,
       sectionId: section,
       required: !!source?.required,
-      options: (choice?.options ?? grid?.options ?? []).map((o: any) => o.value),
+      options: (choice?.options ?? grid?.options ?? [])
+        .filter((o: any) => !o.isOther)
+        .map((o: any) => o.value),
       rows: group ? (group.questions ?? []).map((q: any) => q.rowQuestion.title) : [],
       entryIds: [],
       other: !!choice?.options?.some((o: any) => o.isOther),

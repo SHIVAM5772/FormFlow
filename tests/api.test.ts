@@ -4,6 +4,7 @@ import { sampleForm, sampleAnswers } from './helpers.js';
 import { columns } from '../packages/shared/src/index.js';
 import { generateTemplate } from '../packages/excel-engine/src/index.js';
 import ExcelJS from 'exceljs';
+import JSZip from 'jszip';
 const mocks = vi.hoisted(() => ({
   getProfile: vi.fn(),
   updateProfile: vi.fn(),
@@ -323,7 +324,8 @@ it('downloads dropdown validation with the analyzed form choices through the tem
       res.on('error', callback);
     });
   expect(response.status).toBe(200);
-  expect(response.headers['content-type']).toContain('spreadsheetml.sheet');
+  expect(response.headers['content-type']).toContain('macroEnabled.12');
+  expect(response.headers['content-disposition']).toContain('.xlsm');
   expect(response.headers['x-template-id']).toBe(templateId);
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(response.body);
@@ -350,32 +352,46 @@ it('refuses to generate an empty Excel template when no questions are accessible
   expect(res.status).toBe(409);
   expect(res.body.error.message).toContain('No questions');
 });
-it('returns form restrictions separately from valid workbook rows before submission', async () => {
-  const templateId = '6926ad27-2a8b-487a-adf1-010723b037a3';
-  const form = sampleForm();
-  form.blockers = ['This Google Form requires respondents to sign in to Google.'];
-  mocks.template.mockResolvedValue({
-    schemaId: 'schema',
-    schema: { definition: form, form: { id: 'form-id', schemas: [{ id: 'schema' }] } },
-  });
-  mocks.upload.mockResolvedValue({ id: 'upload-id' });
-  const book = new ExcelJS.Workbook();
-  await book.xlsx.load((await generateTemplate(form, templateId, 10)) as any);
-  book
-    .getWorksheet('Responses')!
-    .addRow(columns(form).map((c) => sampleAnswers[c.key as keyof typeof sampleAnswers]));
-  const res = await request
-    .post('/api/uploads/validate')
-    .set('Origin', 'http://localhost:3000')
-    .set('Cookie', `session=${token}`)
-    .field('templateId', templateId)
-    .attach('file', Buffer.from(await book.xlsx.writeBuffer()), 'responses.xlsx');
-  expect(res.status).toBe(200);
-  expect(res.body.data.valid).toBe(1);
-  expect(res.body.data.formBlockers).toEqual(form.blockers);
-  expect(res.body.data.formId).toBe('form-id');
-  expect(res.body.data.rows[0].answers).toBeUndefined();
-});
+it.each(['xlsx', 'xlsm'])(
+  'accepts %s responses and returns form restrictions separately from valid rows',
+  async (extension) => {
+    const templateId = '6926ad27-2a8b-487a-adf1-010723b037a3';
+    const form = sampleForm();
+    form.blockers = ['This Google Form requires respondents to sign in to Google.'];
+    mocks.template.mockResolvedValue({
+      schemaId: 'schema',
+      schema: { definition: form, form: { id: 'form-id', schemas: [{ id: 'schema' }] } },
+    });
+    mocks.upload.mockResolvedValue({ id: 'upload-id' });
+    const book = new ExcelJS.Workbook();
+    const original = await generateTemplate(form, templateId, 10);
+    await book.xlsx.load(original as any);
+    book
+      .getWorksheet('Responses')!
+      .addRow(columns(form).map((c) => sampleAnswers[c.key as keyof typeof sampleAnswers]));
+    let filled: Buffer = Buffer.from(await book.xlsx.writeBuffer());
+    if (extension === 'xlsm') {
+      const originalZip = await JSZip.loadAsync(original);
+      const filledZip = await JSZip.loadAsync(filled);
+      filledZip.file(
+        'xl/vbaProject.bin',
+        await originalZip.file('xl/vbaProject.bin')!.async('nodebuffer'),
+      );
+      filled = await filledZip.generateAsync({ type: 'nodebuffer' });
+    }
+    const res = await request
+      .post('/api/uploads/validate')
+      .set('Origin', 'http://localhost:3000')
+      .set('Cookie', `session=${token}`)
+      .field('templateId', templateId)
+      .attach('file', filled, `responses.${extension}`);
+    expect(res.status).toBe(200);
+    expect(res.body.data.valid).toBe(1);
+    expect(res.body.data.formBlockers).toEqual(form.blockers);
+    expect(res.body.data.formId).toBe('form-id');
+    expect(res.body.data.rows[0].answers).toBeUndefined();
+  },
+);
 it('allows an explicit retry for a pre-submit mapping failure but refuses UNKNOWN or intent-bearing records', async () => {
   const jobId = '9926ad27-2a8b-487a-adf1-010723b037a3';
   const recordId = '6926ad27-2a8b-487a-adf1-010723b037a3';

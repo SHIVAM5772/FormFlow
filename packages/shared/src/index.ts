@@ -95,16 +95,19 @@ export function fieldKey(q: Question, row?: string) {
   return row === undefined ? q.id : `${q.id}::${row}`;
 }
 type Column = { key: string; heading: string; q: Question; row: string | undefined };
+export function questionTitle(q: Pick<Question, 'id' | 'title'>) {
+  return q.title.trim() ? q.title : `Untitled question (${q.id})`;
+}
 export function columns(form: FormDefinition): Column[] {
   return form.questions.flatMap<Column>((q) =>
     q.rows.length
       ? q.rows.map((r) => ({
           key: fieldKey(q, r),
-          heading: `${q.title} — ${r}${q.required ? ' *' : ''}`,
+          heading: `${questionTitle(q)} — ${r}${q.required ? ' *' : ''}`,
           q,
           row: r,
         }))
-      : [{ key: q.id, heading: `${q.title}${q.required ? ' *' : ''}`, q, row: undefined }],
+      : [{ key: q.id, heading: `${questionTitle(q)}${q.required ? ' *' : ''}`, q, row: undefined }],
   );
 }
 export function activeSections(form: FormDefinition, answers: Answers): Set<string> {

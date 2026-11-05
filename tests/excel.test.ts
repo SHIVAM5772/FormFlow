@@ -1,5 +1,8 @@
 import { it, expect } from 'vitest';
 import ExcelJS from 'exceljs';
+import JSZip from 'jszip';
+import CFB from 'cfb';
+import { readFile } from 'node:fs/promises';
 import { sampleForm, sampleAnswers } from './helpers.js';
 import {
   generateTemplate,
@@ -7,10 +10,170 @@ import {
   validateAnswers,
   inspectZip,
   verifyZipExpansion,
+  templateFileType,
 } from '../packages/excel-engine/src/index.js';
 import { columns, questionSchema } from '../packages/shared/src/index.js';
 import { normalizeGoogleApi, normalizePublic } from '../packages/form-analyzer/src/normalize.js';
 const templateId = '7926ad27-2a8b-487a-adf1-010723b037a3';
+it('exports and imports an untitled checkbox without a false form blocker', async () => {
+  const form = normalizePublic(
+    [
+      null,
+      [
+        '',
+        [[257571857, null, null, 4, [[987, [['Option 1'], ['Option 2']], 0]]]],
+        null,
+        null,
+        null,
+        null,
+        null,
+        null,
+        'Contact',
+      ],
+    ],
+    'https://docs.google.com/forms/d/e/test/viewform',
+  );
+  expect(form.blockers).toEqual([]);
+  const book = new ExcelJS.Workbook();
+  await book.xlsx.load((await generateTemplate(form, templateId, 5)) as any);
+  const sheet = book.getWorksheet('Responses')!;
+  expect(sheet.getCell('A1').text).toBe('Untitled question (257571857)');
+  expect(sheet.getCell('A2').dataValidation.formulae![0]).toMatch(/^FormFlowMulti_/);
+  sheet.getCell('A2').value = 'Option 1; Option 2';
+  const result = await parseUpload(Buffer.from(await book.xlsx.writeBuffer()), form, templateId, 5);
+  expect(result.valid).toBe(1);
+  expect(result.rows[0].answers['257571857']).toBe('Option 1; Option 2');
+});
+it('embeds multi-select VBA into the actual downloaded workbook and imports its answers', async () => {
+  const form = sampleForm();
+  expect(templateFileType(form).extension).toBe('xlsm');
+  const buffer = await generateTemplate(form, templateId, 10);
+  const zip = await JSZip.loadAsync(buffer);
+  const vba = await zip.file('xl/vbaProject.bin')!.async('nodebuffer');
+  expect(vba).toEqual(
+    await readFile(new URL('../packages/excel-engine/assets/vbaProject.bin', import.meta.url)),
+  );
+  const cfb = CFB.read(vba, { type: 'buffer' });
+  expect(CFB.find(cfb, 'ThisWorkbook')).not.toBeNull();
+  expect(CFB.find(cfb, 'Module1')).not.toBeNull();
+  expect(CFB.find(cfb, '__SRP_0')).toBeNull();
+  expect(await zip.file('[Content_Types].xml')!.async('string')).toContain('macroEnabled.main+xml');
+  expect(await zip.file('xl/_rels/workbook.xml.rels')!.async('string')).toContain(
+    'relationships/vbaProject',
+  );
+  expect(await zip.file('xl/workbook.xml')!.async('string')).toContain('codeName="ThisWorkbook"');
+  expect(() => inspectZip(buffer)).toThrow('Unsafe');
+  expect(() => inspectZip(buffer, true)).not.toThrow();
+
+  const book = new ExcelJS.Workbook();
+  await book.xlsx.load(buffer as any);
+  book.getWorksheet('Responses')!.getRow(2).values = columns(form).map(
+    (c) => sampleAnswers[c.key as keyof typeof sampleAnswers],
+  );
+  // ExcelJS drops VBA when saving; restore it to exercise the real XLSM upload path.
+  const filled = await JSZip.loadAsync(Buffer.from(await book.xlsx.writeBuffer()));
+  filled.file('xl/vbaProject.bin', vba);
+  const uploaded = await parseUpload(
+    await filled.generateAsync({ type: 'nodebuffer' }),
+    form,
+    templateId,
+    10,
+  );
+  expect(uploaded.valid).toBe(1);
+  expect(uploaded.rows[0].answers.skills).toBe('TypeScript; Excel');
+});
+
+it('keeps forms with only single choices macro-free', async () => {
+  const form = sampleForm();
+  form.questions = form.questions.filter((q) => !q.type.includes('CHECKBOX'));
+  expect(templateFileType(form).extension).toBe('xlsx');
+  const zip = await JSZip.loadAsync(await generateTemplate(form, templateId, 5));
+  expect(zip.file('xl/vbaProject.bin')).toBeNull();
+});
+it.each([
+  ['RADIO', 'MULTIPLE_CHOICE', 'FormFlowChoices_', false],
+  ['DROP_DOWN', 'DROPDOWN', 'FormFlowChoices_', false],
+  ['CHECKBOX', 'CHECKBOXES', 'FormFlowMulti_', true],
+] as const)(
+  'preserves %s selection behavior including Other answers',
+  async (apiType, type, prefix, multi) => {
+    const form = normalizeGoogleApi(
+      {
+        info: { title: 'Choice types' },
+        items: [
+          {
+            itemId: 'choice',
+            title: 'Choice',
+            questionItem: {
+              question: {
+                required: true,
+                choiceQuestion: {
+                  type: apiType,
+                  options: [{ value: 'A' }, { value: 'B' }, { isOther: true }],
+                },
+              },
+            },
+          },
+        ],
+      },
+      'https://docs.google.com/forms/d/e/test/viewform',
+    );
+    expect(form.questions[0]).toMatchObject({ type, other: true, options: ['A', 'B'] });
+    const book = new ExcelJS.Workbook();
+    await book.xlsx.load((await generateTemplate(form, templateId, 5)) as any);
+    const sheet = book.getWorksheet('Responses')!;
+    const validation = sheet.getCell('A2').dataValidation;
+    expect(validation.type).toBe('list');
+    expect(String(validation.formulae![0]).startsWith(prefix)).toBe(true);
+    expect(validation.showErrorMessage).not.toBe(true);
+    if (!multi) expect(validation.prompt).toContain('Other:');
+    sheet.getCell('A2').value = multi ? 'A; B; Other: custom' : 'Other: custom';
+    const result = await parseUpload(
+      Buffer.from(await book.xlsx.writeBuffer()),
+      form,
+      templateId,
+      5,
+    );
+    expect(result.valid).toBe(1);
+    expect(validateAnswers(form, { choice: multi ? 'A; Unknown' : 'A; B' })).not.toEqual([]);
+  },
+);
+
+it.each([2, 4])(
+  'keeps public choice type %s options separate from the Other placeholder',
+  async (type) => {
+    const form = normalizePublic(
+      [
+        null,
+        [
+          '',
+          [[123, 'Choice', null, type, [[456, [['A'], ['B'], ['', null, null, null, 1]], 1]]]],
+          null,
+          null,
+          null,
+          null,
+          null,
+          null,
+          'Choices',
+        ],
+      ],
+      'https://docs.google.com/forms/d/e/test/viewform',
+    );
+    expect(form.questions[0]).toMatchObject({
+      type: type === 4 ? 'CHECKBOXES' : 'MULTIPLE_CHOICE',
+      other: true,
+      options: ['A', 'B'],
+    });
+    const book = new ExcelJS.Workbook();
+    await book.xlsx.load((await generateTemplate(form, templateId, 5)) as any);
+    const validation = book.getWorksheet('Responses')!.getCell('A2').dataValidation;
+    expect(validation.type).toBe('list');
+    expect(String(validation.formulae![0])).toContain(
+      type === 4 ? 'FormFlowMulti_' : 'FormFlowChoices_',
+    );
+  },
+);
+
 it('marks checkbox and checkbox-grid cells for the add-in while allowing combined answers', async () => {
   const form = sampleForm();
   const book = new ExcelJS.Workbook();
@@ -28,7 +191,9 @@ it('marks checkbox and checkbox-grid cells for the add-in while allowing combine
     expect(ranges[0]).toContain('Validation Reference');
   }
   expect(sheet.getCell('C2').dataValidation.showErrorMessage).toBe(true);
-  sheet.getRow(2).values = columns(form).map((c) => sampleAnswers[c.key as keyof typeof sampleAnswers]);
+  sheet.getRow(2).values = columns(form).map(
+    (c) => sampleAnswers[c.key as keyof typeof sampleAnswers],
+  );
   const result = await parseUpload(
     Buffer.from(await book.xlsx.writeBuffer()),
     form,
@@ -259,6 +424,6 @@ it('does not trust forged ZIP size claims', async () => {
   const buffer = await generateTemplate(sampleForm(), templateId, 5);
   const central = buffer.indexOf(Buffer.from([0x50, 0x4b, 0x01, 0x02]));
   buffer.writeUInt32LE(1, central + 24);
-  inspectZip(buffer);
+  inspectZip(buffer, true);
   await expect(verifyZipExpansion(buffer)).rejects.toThrow('expansion');
 });

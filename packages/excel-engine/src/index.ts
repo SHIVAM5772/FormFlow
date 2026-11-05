@@ -1,4 +1,6 @@
 import ExcelJS from 'exceljs';
+import JSZip from 'jszip';
+import { readFile } from 'node:fs/promises';
 import { createHash } from 'node:crypto';
 import { createInflateRaw } from 'node:zlib';
 import { Readable } from 'node:stream';
@@ -6,6 +8,7 @@ import { z } from 'zod';
 import {
   activeSections,
   columns,
+  questionTitle,
   type Answers,
   type FormDefinition,
   type ValidationResult,
@@ -18,7 +21,7 @@ export function validateAnswers(form: FormDefinition, answers: Answers): string[
   for (const { key, q, row } of columns(form)) {
     const value = (answers[key] ?? '').trim();
     if (!active.has(q.sectionId)) continue;
-    const title = row ? `${q.title} / ${row}` : q.title;
+    const title = row ? `${questionTitle(q)} / ${row}` : questionTitle(q);
     if (!value) {
       if (q.required) errors.push(`${title}: required`);
       continue;
@@ -62,7 +65,23 @@ export function validateAnswers(form: FormDefinition, answers: Answers): string[
   }
   return errors;
 }
+function supportsMultiSelect(q: FormDefinition['questions'][number]) {
+  return (
+    ['CHECKBOXES', 'CHECKBOX_GRID'].includes(q.type) &&
+    q.options.length > 0 &&
+    !q.options.some((option) => option.includes(';'))
+  );
+}
+export function templateFileType(form: FormDefinition) {
+  return form.questions.some(supportsMultiSelect)
+    ? { extension: 'xlsm', contentType: 'application/vnd.ms-excel.sheet.macroEnabled.12' }
+    : {
+        extension: 'xlsx',
+        contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      };
+}
 export async function generateTemplate(form: FormDefinition, templateId: string, maxRows = 2000) {
+  const embedded = templateFileType(form).extension === 'xlsm';
   const book = new ExcelJS.Workbook();
   book.creator = 'FormFlow Automation';
   const sheet = book.addWorksheet('Responses', { views: [{ state: 'frozen', ySplit: 1 }] });
@@ -104,14 +123,10 @@ export async function generateTemplate(form: FormDefinition, templateId: string,
     };
     header.font = { color: { argb: 'FFFFFFFF' }, bold: true };
     header.note = `${c.q.required ? 'Required' : 'Optional'} · ${c.q.type}${c.q.other ? ' · Other: your answer' : ''}`;
-    const multiSelect =
-      ['CHECKBOXES', 'CHECKBOX_GRID'].includes(c.q.type) &&
-      c.q.options.length > 0 &&
-      !c.q.options.some((option) => option.includes(';'));
+    const multiSelect = supportsMultiSelect(c.q);
     if (
       multiSelect ||
       (['DROPDOWN', 'MULTIPLE_CHOICE', 'MULTIPLE_CHOICE_GRID', 'LINEAR_SCALE'].includes(c.q.type) &&
-        !c.q.other &&
         c.q.options.length)
     ) {
       // Workbook-scoped names keep lists on another sheet compatible with Excel.
@@ -125,16 +140,20 @@ export async function generateTemplate(form: FormDefinition, templateId: string,
         showInputMessage: true,
         promptTitle: multiSelect ? 'Choose multiple options' : 'Choose an option',
         prompt: multiSelect
-          ? 'With the FormFlow Excel add-in, double-click for a checkbox menu or use the dropdown to toggle choices. Otherwise separate choices with semicolons.'
-          : 'Select this response cell, then use its drop-down arrow to choose a value.',
-        showErrorMessage: !multiSelect,
+          ? 'Enable macros in desktop Excel. Choose dropdown items one by one to add/remove them in this cell, or double-click for a checkbox menu. No separate add-in is needed.'
+          : c.q.other
+            ? 'Choose one item from the dropdown, or type Other: followed by your answer. Upload validation checks the answer.'
+            : 'Select this response cell, then use its drop-down arrow to choose a value.',
+        // Excel list validation cannot express custom Other answers or combined choices.
+        // Keep the picker available; validate these answers when the file is uploaded.
+        showErrorMessage: !multiSelect && !c.q.other,
         errorTitle: 'Invalid value',
         error: 'Select an allowed value',
         errorStyle: 'stop',
       });
       if (multiSelect)
         header.note +=
-          '\nFormFlow add-in: double-click for a checkbox menu. Without the add-in, separate selected labels with semicolons.';
+          '\nMultiple selections: enable macros in desktop Excel, then pick dropdown items to add/remove them. Double-click for a checkbox menu. Save as .xlsm to keep this feature.';
     }
   });
   sheet.autoFilter = {
@@ -165,7 +184,9 @@ export async function generateTemplate(form: FormDefinition, templateId: string,
     ],
     [
       'Checkboxes',
-      'With the FormFlow desktop Excel add-in, double-click a checkbox response cell for a tick menu, or choose dropdown items one by one to toggle them. Without the add-in, enter exact labels separated by semicolons: Option A; Option B. Save and upload this .xlsx file; do not embed macros. Labels containing semicolons require manual handling.',
+      embedded
+        ? 'Open this .xlsm in desktop Excel and enable its macros if your policy permits. Choose dropdown options one by one to add/remove them in the same cell, or double-click for a checkbox menu and Apply selections. No add-in installation is needed. Save and upload the .xlsm. Excel Web cannot run VBA; there, type exact labels separated by semicolons. Labels containing semicolons require manual handling.'
+        : 'Enter exact labels separated by semicolons: Option A; Option B. Labels containing semicolons require manual handling.',
     ],
     ['Other responses', 'If offered, use Other: your text.'],
     ['Grids', 'Each grid row has its own response column. Checkbox grids use semicolons.'],
@@ -217,7 +238,53 @@ export async function generateTemplate(form: FormDefinition, templateId: string,
     ws.getRow(1).height = 28;
     ws.eachRow((row) => (row.alignment = { vertical: 'top', wrapText: true }));
   }
-  return Buffer.from(await book.xlsx.writeBuffer());
+  const buffer = Buffer.from(await book.xlsx.writeBuffer());
+  if (!embedded) return buffer;
+  const zip = await JSZip.loadAsync(buffer);
+  zip.file(
+    'xl/vbaProject.bin',
+    await readFile(new URL('../assets/vbaProject.bin', import.meta.url)),
+  );
+  const types = await zip.file('[Content_Types].xml')!.async('string');
+  zip.file(
+    '[Content_Types].xml',
+    types
+      .replace(
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml',
+        'application/vnd.ms-excel.sheet.macroEnabled.main+xml',
+      )
+      .replace(
+        '</Types>',
+        '<Override PartName="/xl/vbaProject.bin" ContentType="application/vnd.ms-office.vbaProject"/></Types>',
+      ),
+  );
+  const rels = await zip.file('xl/_rels/workbook.xml.rels')!.async('string');
+  zip.file(
+    'xl/_rels/workbook.xml.rels',
+    rels.replace(
+      '</Relationships>',
+      '<Relationship Id="rIdFormFlowVba" Type="http://schemas.microsoft.com/office/2006/relationships/vbaProject" Target="vbaProject.bin"/></Relationships>',
+    ),
+  );
+  const workbook = await zip.file('xl/workbook.xml')!.async('string');
+  zip.file(
+    'xl/workbook.xml',
+    // ExcelJS enables filterPrivacy by default. In a VBA workbook it causes a
+    // Document Inspector warning on every save; these templates contain only
+    // FormFlow's generated metadata, so do not request that unsupported cleanup.
+    workbook
+      .replace('<workbookPr', '<workbookPr codeName="ThisWorkbook"')
+      .replace('filterPrivacy="1"', 'filterPrivacy="0"'),
+  );
+  for (let i = 1; i <= book.worksheets.length; i++) {
+    const path = `xl/worksheets/sheet${i}.xml`;
+    let xml = await zip.file(path)!.async('string');
+    xml = xml.includes('<sheetPr')
+      ? xml.replace('<sheetPr', `<sheetPr codeName="Sheet${i}"`)
+      : xml.replace('<dimension', `<sheetPr codeName="Sheet${i}"/><dimension`);
+    zip.file(path, xml);
+  }
+  return zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
 }
 export async function parseUpload(
   buffer: Buffer,
@@ -226,8 +293,14 @@ export async function parseUpload(
   maxRows = 2000,
 ): Promise<ValidationResult> {
   // Bound ZIP expansion before ExcelJS materializes XML; reject encrypted/ZIP64 archives.
-  inspectZip(buffer);
+  inspectZip(buffer, true);
   await verifyZipExpansion(buffer);
+  // Never run or retain uploaded VBA. Only plain response values are imported.
+  const zip = await JSZip.loadAsync(buffer);
+  if (zip.file('xl/vbaProject.bin')) {
+    zip.remove('xl/vbaProject.bin');
+    buffer = await zip.generateAsync({ type: 'nodebuffer' });
+  }
   const book = new ExcelJS.Workbook();
   await book.xlsx.load(buffer as any);
   const sheet = book.getWorksheet('Responses');
@@ -289,7 +362,7 @@ export async function parseUpload(
     rows,
   };
 }
-export function inspectZip(buffer: Buffer) {
+export function inspectZip(buffer: Buffer, allowEmbeddedVba = false) {
   if (buffer.length < 22 || buffer.readUInt32LE(0) !== 0x04034b50)
     throw new Error('Upload must be a valid XLSX ZIP file');
   let eocd = -1;
@@ -318,7 +391,8 @@ export function inspectZip(buffer: Buffer) {
       expanded > 50 * 1024 * 1024 ||
       size === 0xffffffff ||
       name.includes('..') ||
-      /vbaProject|externalLinks/i.test(name)
+      /externalLinks/i.test(name) ||
+      (/vbaProject/i.test(name) && !(allowEmbeddedVba && name === 'xl/vbaProject.bin'))
     )
       throw new Error('Unsafe or oversized workbook');
     position +=

@@ -44,6 +44,7 @@ import {
 } from 'lucide-react';
 import {
   restrictionMessage,
+  questionTitle,
   safeToRetry,
   type FormDefinition,
 } from '../../../packages/shared/src/index';
@@ -1027,7 +1028,9 @@ export function FormDetail() {
   const m = useMutation({
     mutationFn: () => download(`/forms/${id}/template`, 'formflow-template.xlsx'),
     onSuccess: (templateId) => {
-      toast('Template downloaded. Fill it and upload it when ready.');
+      toast(
+        'Template downloaded. For multiple selections, open in desktop Excel and enable its macros.',
+      );
       router.push(`/upload?template=${templateId}`);
     },
     onError: (e) => toast(errorMessage(e)),
@@ -1129,7 +1132,7 @@ export function FormDetail() {
             <span className="question-number">{String(i + 1).padStart(2, '0')}</span>
             <div>
               <h3>
-                {q.title} {q.required && <b className="required">*</b>}
+                {questionTitle(q)} {q.required && <b className="required">*</b>}
               </h3>
               <span className="subtle">
                 {q.type.replaceAll('_', ' ')} · {q.required ? 'Required' : 'Optional'} ·{' '}
@@ -1221,7 +1224,7 @@ export function Upload() {
   const toast = useToast();
   const validation = useMutation({
     mutationFn: async () => {
-      if (!file || !template) throw new Error('Select a template and an XLSX file');
+      if (!file || !template) throw new Error('Select a template and an XLSX or XLSM file');
       const data = new FormData();
       data.append('templateId', template);
       data.append('file', file);
@@ -1241,8 +1244,8 @@ export function Upload() {
   });
   const formBlocked = (validation.data?.formBlockers?.length ?? 0) > 0;
   function choose(next: File | undefined) {
-    if (next && !next.name.toLowerCase().endsWith('.xlsx')) {
-      toast('Choose an XLSX file.');
+    if (next && !/\.(xlsx|xlsm)$/i.test(next.name)) {
+      toast('Choose an XLSX or XLSM file.');
       return;
     }
     setFile(next ?? null);
@@ -1303,14 +1306,14 @@ export function Upload() {
           <p>
             {file
               ? `${(file.size / 1024).toFixed(0)} KB · Ready to validate`
-              : 'or click to browse · XLSX only'}
+              : 'or click to browse · XLSX or XLSM'}
           </p>
           <span className="subtle">KEEP THE ORIGINAL HEADINGS AND FIELD MAPPING</span>
         </div>
         <input
           ref={input}
           type="file"
-          accept=".xlsx"
+          accept=".xlsx,.xlsm"
           className="sr-only"
           aria-label="Excel file"
           onChange={(e) => choose(e.target.files?.[0])}
@@ -1368,13 +1371,15 @@ export function Upload() {
                   <tr key={r.rowNumber}>
                     <td>Row {r.rowNumber}</td>
                     <td>
-                      <Status value={r.errors.length ? 'FAILED' : 'VALIDATING'} />
+                      <Status
+                        value={
+                          r.errors.length ? 'FAILED' : formBlocked ? 'NEEDS_MANUAL_ACTION' : 'READY'
+                        }
+                      />
                     </td>
                     <td>
                       {r.errors.join('; ') ||
-                        (formBlocked
-                          ? 'Valid row — form access is blocked'
-                          : 'Ready for submission')}
+                        (formBlocked ? 'Valid row — form needs review' : 'Ready for submission')}
                     </td>
                   </tr>
                 ))}
@@ -1385,13 +1390,13 @@ export function Upload() {
             <div className="notice error" role="alert">
               <AlertTriangle size={20} />
               <div>
-                <strong>Row validation passed, but this form has submission restrictions.</strong>
+                <strong>Row validation passed, but form submission needs review.</strong>
                 {validation.data.formBlockers.map((reason: string, i: number) => (
                   <p key={i}>{restrictionMessage(reason)}</p>
                 ))}
                 <p>
-                  Ask the form owner about respondent access. Valid Excel rows do not remove Google
-                  sign-in requirements.
+                  Resolve the listed issues, then reanalyze the form and download its updated
+                  template.
                 </p>
                 {validation.data.formId && (
                   <Link href={`/forms/${validation.data.formId}`}>

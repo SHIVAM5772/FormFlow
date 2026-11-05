@@ -31,7 +31,9 @@ Email-change challenges use the `EmailChangeVerification` MongoDB collection, se
 
 ## Excel checkbox selections
 
-New Excel templates include checkbox option lists compatible with the optional Windows desktop [FormFlow multi-select add-in](excel-addin/README.md). With the add-in loaded, double-click a checkbox cell for a tick menu, or choose dropdown options one by one to toggle them in the same cell. The response file stays `.xlsx`. Without the add-in, separate exact choice labels with semicolons. The add-in source and build/setup instructions are local; no prebuilt binary is included.
+Forms containing checkbox questions or checkbox grids now download as `.xlsm` with the multi-select VBA embedded. Open the downloaded file in desktop Excel and enable its macros if permitted by your policy. Choose dropdown options one by one to add/remove them in the same cell, or double-click for a checkbox menu and apply the selections. Single-choice fields keep replacing their value. Save and upload the `.xlsm` directly; `.xlsx` uploads still work. Excel Web cannot execute this VBA; enter exact labels separated by semicolons there.
+
+No separate add-in is needed for new downloads. The checked-in `packages/excel-engine/assets/vbaProject.bin` contains source-only VBA built from the reviewable code in `excel-addin/src`. Rebuild it after VBA edits with `npm run build:excel-macros`; this needs neither Excel nor access to its VBA project. The build uses the public XlsxWriter example only for project/type-library metadata, replaces all its macro sources, and excludes compiled caches. Its license is included in `excel-addin/VBA-BASE-LICENSE.txt`. The older [optional add-in](excel-addin/README.md) is retained for existing `.xlsx` templates.
 
 ## Production
 

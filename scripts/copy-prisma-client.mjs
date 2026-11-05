@@ -5,3 +5,8 @@ await cp(
   new URL('../dist/packages/database/generated/client/', import.meta.url),
   { recursive: true },
 );
+await cp(
+  new URL('../packages/excel-engine/assets/', import.meta.url),
+  new URL('../dist/packages/excel-engine/assets/', import.meta.url),
+  { recursive: true },
+);
