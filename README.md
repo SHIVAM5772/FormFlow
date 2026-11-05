@@ -37,6 +37,8 @@ No separate add-in is needed for new downloads. The checked-in `packages/excel-e
 
 ## Production
 
+Windows marks website downloads as internet files and may show a red **Security Risk** banner that blocks VBA. The server cannot clear this Windows file flag. Only for a FormFlow workbook you trust: close Excel, right-click the saved file, choose **Properties → Unblock → Apply**, then reopen it and follow the macro prompt if policy permits. Organization policy can still prevent macros. See [Microsoft's explanation](https://learn.microsoft.com/en-us/microsoft-365-apps/security/internet-macros-blocked). While macros are blocked, type exact choices separated by semicolons.
+
 See [SETUP_PRODUCTION.md](SETUP_PRODUCTION.md). Keep the Vercel project root at the repository root. The frontend and native Express function share one hostname; /api/* routes to Express. Chromium is bundled through @sparticuz/chromium for Linux functions; local development uses Playwright's installed browser. Job pages poll persisted state every four seconds.
 
 Submission processing uses an authenticated Vercel Cron endpoint and a renewable MongoDB lease. Each invocation starts new rows for up to three minutes, leaving time inside its five-minute function limit to finish. Remaining queued rows wait for the next invocation. Interrupted rows with uncertain browser results become UNKNOWN and are never automatically replayed.

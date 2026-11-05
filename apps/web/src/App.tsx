@@ -95,6 +95,33 @@ function Empty({ title, children }: { title: string; children: ReactNode }) {
     </div>
   );
 }
+function ExcelMacroHelp() {
+  return (
+    <div className="notice" role="note">
+      <FileSpreadsheet size={20} />
+      <div>
+        <strong>Excel multi-select needs macros in desktop Excel.</strong>
+        <p>
+          If a downloaded .xlsm shows a red “Security Risk” banner, its macros are blocked. Only if
+          you trust this FormFlow file: close it, right-click the saved file in File Explorer →
+          Properties → Unblock → Apply, then reopen it. Your organization may require administrator
+          approval.
+        </p>
+        <p>
+          You can still type choices such as Option 1; Option 3 in one cell while macros are
+          blocked.
+        </p>
+        <a
+          href="https://learn.microsoft.com/en-us/microsoft-365-apps/security/internet-macros-blocked"
+          target="_blank"
+          rel="noreferrer"
+        >
+          Microsoft guidance for downloaded files
+        </a>
+      </div>
+    </div>
+  );
+}
 export function Status({ value }: { value: string }) {
   return (
     <span className={`status ${value.toLowerCase()}`}>
@@ -1029,7 +1056,7 @@ export function FormDetail() {
     mutationFn: () => download(`/forms/${id}/template`, 'formflow-template.xlsx'),
     onSuccess: (templateId) => {
       toast(
-        'Template downloaded. For multiple selections, open in desktop Excel and enable its macros.',
+        'Template downloaded. For multi-select, review the Excel macro instructions on the upload page.',
       );
       router.push(`/upload?template=${templateId}`);
     },
@@ -1071,6 +1098,7 @@ export function FormDetail() {
           </div>
         }
       />
+      {definition.questions.some((q) => q.type.includes('CHECKBOX')) && <ExcelMacroHelp />}
       <div className="form-meta">
         <span>
           <ClipboardList size={16} />
@@ -1260,6 +1288,7 @@ export function Upload() {
         title="Put your responses in motion."
         description="Upload your completed template. Every row is validated before submission."
       />
+      <ExcelMacroHelp />
       <div className="panel upload-panel">
         <label htmlFor="template-select">Choose the template you filled</label>
         <select

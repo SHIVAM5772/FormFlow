@@ -140,7 +140,7 @@ export async function generateTemplate(form: FormDefinition, templateId: string,
         showInputMessage: true,
         promptTitle: multiSelect ? 'Choose multiple options' : 'Choose an option',
         prompt: multiSelect
-          ? 'Enable macros in desktop Excel. Choose dropdown items one by one to add/remove them in this cell, or double-click for a checkbox menu. No separate add-in is needed.'
+          ? 'Desktop Excel must permit macros. If a Security Risk banner appears, see Instructions. Pick dropdown items to add/remove them in this cell, or double-click for a checkbox menu.'
           : c.q.other
             ? 'Choose one item from the dropdown, or type Other: followed by your answer. Upload validation checks the answer.'
             : 'Select this response cell, then use its drop-down arrow to choose a value.',
@@ -187,6 +187,12 @@ export async function generateTemplate(form: FormDefinition, templateId: string,
       embedded
         ? 'Open this .xlsm in desktop Excel and enable its macros if your policy permits. Choose dropdown options one by one to add/remove them in the same cell, or double-click for a checkbox menu and Apply selections. No add-in installation is needed. Save and upload the .xlsm. Excel Web cannot run VBA; there, type exact labels separated by semicolons. Labels containing semicolons require manual handling.'
         : 'Enter exact labels separated by semicolons: Option A; Option B. Labels containing semicolons require manual handling.',
+    ],
+    [
+      'Downloaded macros blocked',
+      embedded
+        ? 'Windows can block macros in files downloaded from a website, even when the same file works locally. Only if you trust this FormFlow file: close it in Excel, right-click the saved file in File Explorer, open Properties, select Unblock if available, Apply, and reopen in desktop Excel. Follow any remaining macro prompt. If your organization blocks it, ask your administrator. See https://learn.microsoft.com/en-us/microsoft-365-apps/security/internet-macros-blocked . While macros are unavailable, enter exact checkbox labels separated by semicolons.'
+        : 'This workbook has no embedded macros.',
     ],
     ['Other responses', 'If offered, use Other: your text.'],
     ['Grids', 'Each grid row has its own response column. Checkbox grids use semicolons.'],

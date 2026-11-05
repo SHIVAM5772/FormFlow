@@ -11,8 +11,8 @@
   "scripts": {
     "build:excel-macros": "node excel-addin/build-embedded.mjs",
     "setup:env": "node scripts/init-env.mjs",
-    "dev": "concurrently -k -n api,next \"tsx watch apps/api/src/server.ts\" \"next dev apps/web --hostname 127.0.0.1 --port 3000 --webpack\"",
-    "dev:api": "tsx watch apps/api/src/server.ts",
+    "dev": "concurrently -k -n backend,next \"npm run dev:backend\" \"next dev apps/web --hostname 127.0.0.1 --port 3000 --webpack\"",
+    "dev:api": "npm run dev:backend",
     "dev:web": "next dev apps/web --hostname 127.0.0.1 --port 3000 --webpack",
     "worker": "tsx workers/submission-worker/src/index.ts",
     "build": "npm run build:server && npm run build:web",
@@ -34,7 +34,7 @@
     "verify:proxy": "node scripts/verify-next-proxy.mjs",
     "start:web": "next start apps/web --hostname 127.0.0.1 --port 3000",
     "dev:vercel": "node scripts/vercel-dev.mjs",
-    "dev:backend": "tsx watch apps/api/src/server.ts"
+    "dev:backend": "concurrently -k -n api,worker \"tsx watch apps/api/src/server.ts\" \"tsx watch workers/submission-worker/src/index.ts\""
   },
   "dependencies": {
     "@hookform/resolvers": "^5.2.2",
