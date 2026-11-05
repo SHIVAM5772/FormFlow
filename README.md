@@ -31,6 +31,8 @@ Email-change challenges use the `EmailChangeVerification` MongoDB collection, se
 
 ## Excel checkbox selections
 
+For recurring downloads, use the **one-time Excel add-in setup** shown on the form and upload pages. Download and activate the built add-in once, then choose **Add-in .xlsx (after setup)** beside the form's download button. FormFlow remembers this browser preference. The downloaded response files contain no macros; the installed add-in provides same-cell multi-select, so subsequent response downloads need no macro unblocking. Protected View can still require allowing editing. Other devices need their own setup. See [setup steps](excel-addin/README.md).
+
 Forms containing checkbox questions or checkbox grids now download as `.xlsm` with the multi-select VBA embedded. Open the downloaded file in desktop Excel and enable its macros if permitted by your policy. Choose dropdown options one by one to add/remove them in the same cell, or double-click for a checkbox menu and apply the selections. Single-choice fields keep replacing their value. Save and upload the `.xlsm` directly; `.xlsx` uploads still work. Excel Web cannot execute this VBA; enter exact labels separated by semicolons there.
 
 No separate add-in is needed for new downloads. The checked-in `packages/excel-engine/assets/vbaProject.bin` contains source-only VBA built from the reviewable code in `excel-addin/src`. Rebuild it after VBA edits with `npm run build:excel-macros`; this needs neither Excel nor access to its VBA project. The build uses the public XlsxWriter example only for project/type-library metadata, replaces all its macro sources, and excludes compiled caches. Its license is included in `excel-addin/VBA-BASE-LICENSE.txt`. The older [optional add-in](excel-addin/README.md) is retained for existing `.xlsx` templates.
@@ -41,9 +43,9 @@ Windows marks website downloads as internet files and may show a red **Security 
 
 See [SETUP_PRODUCTION.md](SETUP_PRODUCTION.md). Keep the Vercel project root at the repository root. The frontend and native Express function share one hostname; /api/* routes to Express. Chromium is bundled through @sparticuz/chromium for Linux functions; local development uses Playwright's installed browser. Job pages poll persisted state every four seconds.
 
-Submission processing uses an authenticated Vercel Cron endpoint and a renewable MongoDB lease. Each invocation starts new rows for up to three minutes, leaving time inside its five-minute function limit to finish. Remaining queued rows wait for the next invocation. Interrupted rows with uncertain browser results become UNKNOWN and are never automatically replayed.
+Authorized submissions start immediately using Vercel `waitUntil` background tasks and a renewable MongoDB lease. Opening an owned active job also wakes processing, so the jobs page's polling continues batches between bounded invocations. Each invocation starts new rows for up to three minutes, leaving time inside its five-minute limit to finish. Keep the job page open for large batches; if closed, remaining rows resume on another request or the recovery cron. Interrupted rows with uncertain browser results become UNKNOWN and are never automatically replayed.
 
-The checked-in schedule runs daily at 00:00 UTC (05:30 IST, subject to Hobby timing precision). On Pro/Enterprise, change the cron schedule to `* * * * *` for processing every minute. Daily processing can leave a large batch queued for multiple days. Use the Vercel Cron dashboard's Run action for an additional authenticated invocation.
+The recovery schedule runs daily at 00:00 UTC (05:30 IST, subject to Hobby timing precision); new authorized jobs do not wait for it. On Pro/Enterprise, change the schedule to `* * * * *` for minute-level recovery when no job page is active. Use the Vercel Cron dashboard's Run action for an additional authenticated invocation.
 
 ## Commands
 

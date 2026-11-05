@@ -72,16 +72,25 @@ function supportsMultiSelect(q: FormDefinition['questions'][number]) {
     !q.options.some((option) => option.includes(';'))
   );
 }
-export function templateFileType(form: FormDefinition) {
-  return form.questions.some(supportsMultiSelect)
+export type TemplateMode = 'embedded' | 'addin';
+export function templateFileType(form: FormDefinition, mode: TemplateMode = 'embedded') {
+  return mode === 'embedded' && form.questions.some(supportsMultiSelect)
     ? { extension: 'xlsm', contentType: 'application/vnd.ms-excel.sheet.macroEnabled.12' }
     : {
         extension: 'xlsx',
         contentType: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
       };
 }
-export async function generateTemplate(form: FormDefinition, templateId: string, maxRows = 2000) {
-  const embedded = templateFileType(form).extension === 'xlsm';
+export async function excelAddin() {
+  return readFile(new URL('../assets/FormFlowMultiSelect.xlam', import.meta.url));
+}
+export async function generateTemplate(
+  form: FormDefinition,
+  templateId: string,
+  maxRows = 2000,
+  mode: TemplateMode = 'embedded',
+) {
+  const embedded = templateFileType(form, mode).extension === 'xlsm';
   const book = new ExcelJS.Workbook();
   book.creator = 'FormFlow Automation';
   const sheet = book.addWorksheet('Responses', { views: [{ state: 'frozen', ySplit: 1 }] });
@@ -140,7 +149,9 @@ export async function generateTemplate(form: FormDefinition, templateId: string,
         showInputMessage: true,
         promptTitle: multiSelect ? 'Choose multiple options' : 'Choose an option',
         prompt: multiSelect
-          ? 'Desktop Excel must permit macros. If a Security Risk banner appears, see Instructions. Pick dropdown items to add/remove them in this cell, or double-click for a checkbox menu.'
+          ? embedded
+            ? 'Desktop Excel must permit macros. If a Security Risk banner appears, see Instructions. Pick dropdown items to add/remove them in this cell, or double-click for a checkbox menu.'
+            : 'With the FormFlow add-in installed, pick dropdown items to add/remove choices in this cell, or double-click for a checkbox menu. Otherwise type labels separated by semicolons.'
           : c.q.other
             ? 'Choose one item from the dropdown, or type Other: followed by your answer. Upload validation checks the answer.'
             : 'Select this response cell, then use its drop-down arrow to choose a value.',
@@ -152,8 +163,9 @@ export async function generateTemplate(form: FormDefinition, templateId: string,
         errorStyle: 'stop',
       });
       if (multiSelect)
-        header.note +=
-          '\nMultiple selections: enable macros in desktop Excel, then pick dropdown items to add/remove them. Double-click for a checkbox menu. Save as .xlsm to keep this feature.';
+        header.note += embedded
+          ? '\nMultiple selections: enable macros in desktop Excel, then pick dropdown items to add/remove them. Double-click for a checkbox menu. Save as .xlsm to keep this feature.'
+          : '\nMultiple selections use the installed FormFlow add-in. Pick dropdown items to add/remove them, or double-click for a checkbox menu. Save and upload as .xlsx.';
     }
   });
   sheet.autoFilter = {
@@ -186,7 +198,7 @@ export async function generateTemplate(form: FormDefinition, templateId: string,
       'Checkboxes',
       embedded
         ? 'Open this .xlsm in desktop Excel and enable its macros if your policy permits. Choose dropdown options one by one to add/remove them in the same cell, or double-click for a checkbox menu and Apply selections. No add-in installation is needed. Save and upload the .xlsm. Excel Web cannot run VBA; there, type exact labels separated by semicolons. Labels containing semicolons require manual handling.'
-        : 'Enter exact labels separated by semicolons: Option A; Option B. Labels containing semicolons require manual handling.',
+        : 'With the FormFlow add-in installed in desktop Excel, pick dropdown options to add/remove them in the same cell, or double-click for a checkbox menu. This response file contains no macros; save and upload it as .xlsx. Without the add-in, type exact labels separated by semicolons: Option A; Option B. Labels containing semicolons require manual handling.',
     ],
     [
       'Downloaded macros blocked',

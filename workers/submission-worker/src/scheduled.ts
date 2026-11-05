@@ -2,7 +2,7 @@ import { db } from '../../../packages/database/src/index.js';
 import { processBatch } from '../../../packages/submission-engine/src/process.js';
 import { workerLease } from '../../../packages/submission-engine/src/lease.js';
 
-export async function runScheduledWorker() {
+export async function runScheduledWorker(jobId?: string) {
   if ((process.env.QUEUE_BACKEND ?? 'mongodb') !== 'mongodb')
     throw new Error('Vercel scheduled processing requires QUEUE_BACKEND=mongodb');
   const lease = workerLease();
@@ -30,6 +30,7 @@ export async function runScheduledWorker() {
   try {
     const jobs = await db.submissionJob.findMany({
       where: {
+        ...(jobId ? { id: jobId } : {}),
         OR: [
           { status: { in: ['QUEUED', 'RUNNING'] } },
           { status: { in: ['PAUSED', 'CANCELLED'] }, records: { some: { status: 'RUNNING' } } },

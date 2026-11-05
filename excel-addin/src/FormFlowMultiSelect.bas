@@ -27,12 +27,17 @@ End Sub
 Public Sub FormFlowEnable()
     Set hooks = New CFormFlowEvents
     Set hooks.App = Application
+    ' Add-ins can load before any workbook window exists.
+    On Error Resume Next
     If TypeName(Application.Selection) = "Range" Then FormFlowRememberCell Application.Selection
+    On Error GoTo 0
 End Sub
 
 Public Function FormFlowChoiceSource(ByVal cell As Range) As Range
     On Error GoTo NotApplicable
     If cell Is Nothing Then Exit Function
+    ' Embedded XLSM workbooks handle their own events; avoid toggling twice.
+    If ThisWorkbook.IsAddin And LCase$(Right$(cell.Worksheet.Parent.Name, 5)) <> ".xlsx" Then Exit Function
     If cell.Cells.CountLarge <> 1 Then Exit Function
     If cell.Worksheet.Name <> "Responses" Or cell.Row < 2 Then Exit Function
     If cell.Validation.Type <> xlValidateList Then Exit Function

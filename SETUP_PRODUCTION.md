@@ -1,6 +1,6 @@
 # Vercel deployment
 
-The frontend and Express API deploy as native Vercel Services. Submission processing runs in a scheduled function. MongoDB Atlas supplies durable storage.
+The frontend and Express API deploy as native Vercel Services. Authorized submissions start in a Vercel `waitUntil` background task immediately; MongoDB Atlas supplies durable storage. Cron remains a recovery mechanism.
 
 1. Run `npx vercel login` and `npx vercel link` from the repository root. Keep Root Directory at `.`.
 2. Configure production environment variables:
@@ -48,11 +48,13 @@ Reference: [Vercel environment variable management](https://vercel.com/docs/envi
 
 ## Scheduled submissions
 
+Creating, resuming or explicitly retrying an authorized batch immediately wakes the worker in production. The API returns promptly and registers the processing promise with Vercel `waitUntil` so it can continue after the HTTP response. Authenticated polling of an owned queued/running job also wakes processing, recovering older queued batches and continuing large batches between bounded invocations. Keep the jobs page open for continuous progress across those invocations. This never retries UNKNOWN rows or submits paused/cancelled jobs. The same global MongoDB lease prevents local, cron and request-triggered workers from processing concurrently.
+
 The daily schedule is compatible with Hobby. It calls /api/internal/process with Authorization: Bearer CRON_SECRET. Missing or incorrect authentication receives 401. Cron runs only on production; previews do not automatically consume jobs.
 
 Each invocation holds a renewable MongoDB lease shared with local workers and processes queued jobs for a bounded period. New rows stop starting after three minutes; the function limit is five minutes. Unfinished batches resume on later invocations. Hard timeouts can leave uncertain rows, which are marked UNKNOWN on recovery and never replayed automatically.
 
-Daily processing is not continuous: a large batch can take multiple days. On Pro/Enterprise, set `crons[0].schedule` in vercel.json to `* * * * *` and redeploy for a run every minute. The Cron Jobs dashboard also offers Run for manual invocations. This repository does not select or upgrade your plan.
+The daily cron is a recovery fallback when no job page or request triggers further work. If a batch spans multiple invocation budgets and its page is closed, remaining rows wait for another request or cron. On Pro/Enterprise, set `crons[0].schedule` in vercel.json to `* * * * *` for a minute-level recovery cadence. The Cron Jobs dashboard also offers Run for manual invocations. This repository does not select or upgrade your plan.
 
 Local development starts a continuous worker through `npm run dev:vercel`; Vercel does not invoke crons locally. Keep local and production databases separate unless you intentionally want local processing to consume production jobs.
 

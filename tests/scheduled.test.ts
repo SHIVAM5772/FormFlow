@@ -30,6 +30,13 @@ it('does not consume jobs while another worker owns the lease', async () => {
   expect(await runScheduledWorker()).toEqual({ busy: true, processedJobs: 0 });
   expect(mocks.findMany).not.toHaveBeenCalled();
 });
+it('targets the requested authorized batch while sharing the consumer lease', async () => {
+  mocks.findMany.mockResolvedValue([{ id: 'requested-job' }]);
+  await runScheduledWorker('requested-job');
+  expect(mocks.findMany.mock.calls[0][0].where.id).toBe('requested-job');
+  expect(mocks.process.mock.calls[0][0]).toBe('requested-job');
+  expect(mocks.release).toHaveBeenCalledOnce();
+});
 it('stops starting jobs at the invocation budget and releases its lease', async () => {
   mocks.findMany.mockResolvedValue([{ id: 'first' }, { id: 'second' }]);
   mocks.process.mockImplementation(async (_id, _publish, _submit, owned, canStart) => {

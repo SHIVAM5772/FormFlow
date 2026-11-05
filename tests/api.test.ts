@@ -31,6 +31,7 @@ const mocks = vi.hoisted(() => ({
   updateRecord: vi.fn(),
   updateJob: vi.fn(),
   transaction: vi.fn(),
+  groups: vi.fn(),
 }));
 vi.mock('../apps/api/src/profile.js', () => ({
   getProfile: mocks.getProfile,
@@ -72,7 +73,11 @@ vi.mock('../packages/database/src/index.js', () => ({
     excelTemplate: { findFirst: mocks.template, create: mocks.createTemplate },
     upload: { upsert: mocks.upload },
     submissionJob: { findFirst: mocks.job, updateMany: mocks.updateJob },
-    submissionRecord: { findFirst: mocks.record, updateMany: mocks.updateRecord },
+    submissionRecord: {
+      findFirst: mocks.record,
+      updateMany: mocks.updateRecord,
+      groupBy: mocks.groups,
+    },
     $transaction: mocks.transaction,
   },
   encrypt: vi.fn(),
@@ -296,6 +301,30 @@ it('does not leak another user’s form', async () => {
     '7926ad27-2a8b-487a-adf1-010723b037a3',
   );
 });
+it.each(['QUEUED', 'RUNNING', 'PAUSED', 'COMPLETED'])(
+  'wakes only an owned active batch when polling status %s',
+  async (status) => {
+    const { createApp } = await import('../apps/api/src/app.js');
+    const wake = vi.fn(async () => {});
+    const client = supertest(createApp({ dispatchJob: wake }));
+    const jobId = '9926ad27-2a8b-487a-adf1-010723b037a3';
+    mocks.job.mockResolvedValue({ id: jobId, status });
+    mocks.groups.mockResolvedValue([{ status: 'QUEUED', _count: 1 }]);
+    expect((await client.get(`/api/submissions/${jobId}`)).status).toBe(401);
+    expect(wake).not.toHaveBeenCalled();
+    expect(
+      (await client.get(`/api/submissions/${jobId}`).set('Cookie', `session=${token}`)).status,
+    ).toBe(200);
+    if (['QUEUED', 'RUNNING'].includes(status)) expect(wake).toHaveBeenCalledWith(jobId);
+    else expect(wake).not.toHaveBeenCalled();
+    mocks.job.mockResolvedValue(null);
+    wake.mockClear();
+    expect(
+      (await client.get(`/api/submissions/${jobId}`).set('Cookie', `session=${token}`)).status,
+    ).toBe(404);
+    expect(wake).not.toHaveBeenCalled();
+  },
+);
 it('validates input and requires explicit submission authorization', async () => {
   const res = await request
     .post('/api/submissions/start')
@@ -305,7 +334,7 @@ it('validates input and requires explicit submission authorization', async () =>
   expect(res.status).toBe(400);
   expect(res.body.error.code).toBe('VALIDATION_ERROR');
 });
-it('downloads dropdown validation with the analyzed form choices through the template endpoint', async () => {
+it.each(['embedded', 'addin'])('downloads %s templates with the analyzed choices', async (mode) => {
   const definition = sampleForm();
   const templateId = '6926ad27-2a8b-487a-adf1-010723b037a3';
   mocks.findFirst.mockResolvedValue({
@@ -314,7 +343,7 @@ it('downloads dropdown validation with the analyzed form choices through the tem
   });
   mocks.createTemplate.mockResolvedValue({ id: templateId });
   const response = await request
-    .get('/api/forms/9926ad27-2a8b-487a-adf1-010723b037a3/template')
+    .get(`/api/forms/9926ad27-2a8b-487a-adf1-010723b037a3/template?mode=${mode}`)
     .set('Cookie', `session=${token}`)
     .buffer(true)
     .parse((res, callback) => {
@@ -324,8 +353,12 @@ it('downloads dropdown validation with the analyzed form choices through the tem
       res.on('error', callback);
     });
   expect(response.status).toBe(200);
-  expect(response.headers['content-type']).toContain('macroEnabled.12');
-  expect(response.headers['content-disposition']).toContain('.xlsm');
+  expect(response.headers['content-type']).toContain(
+    mode === 'addin' ? 'spreadsheetml.sheet' : 'macroEnabled.12',
+  );
+  expect(response.headers['content-disposition']).toContain(mode === 'addin' ? '.xlsx' : '.xlsm');
+  const zip = await JSZip.loadAsync(response.body);
+  expect(Boolean(zip.file('xl/vbaProject.bin'))).toBe(mode === 'embedded');
   expect(response.headers['x-template-id']).toBe(templateId);
   const workbook = new ExcelJS.Workbook();
   await workbook.xlsx.load(response.body);
@@ -338,6 +371,26 @@ it('downloads dropdown validation with the analyzed form choices through the tem
     if (row.getCell(1).text === columns(definition)[2].heading) options.push(row.getCell(2).text);
   });
   expect(options).toEqual(['Engineering', 'Operations']);
+});
+it('serves the built add-in only to authenticated users', async () => {
+  expect((await request.get('/api/excel/addin')).status).toBe(401);
+  const response = await request
+    .get('/api/excel/addin')
+    .set('Cookie', `session=${token}`)
+    .buffer(true)
+    .parse((res, callback) => {
+      const chunks: Buffer[] = [];
+      res.on('data', (chunk: Buffer) => chunks.push(chunk));
+      res.on('end', () => callback(null, Buffer.concat(chunks)));
+      res.on('error', callback);
+    });
+  expect(response.status).toBe(200);
+  expect(response.headers['content-disposition']).toContain('FormFlowMultiSelect.xlam');
+  const zip = await JSZip.loadAsync(response.body);
+  expect(await zip.file('[Content_Types].xml')!.async('string')).toContain(
+    'addin.macroEnabled.main+xml',
+  );
+  expect(zip.file('xl/vbaProject.bin')).not.toBeNull();
 });
 it('refuses to generate an empty Excel template when no questions are accessible', async () => {
   const definition = sampleForm();

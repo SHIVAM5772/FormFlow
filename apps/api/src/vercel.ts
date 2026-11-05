@@ -1,6 +1,8 @@
 import express from 'express';
 import { timingSafeEqual } from 'node:crypto';
-import { createApp } from './app.js';
+import { waitUntil } from '@vercel/functions';
+import { createApp, logger } from './app.js';
+import { dispatch, usesMongoQueue } from '../../../packages/submission-engine/src/queue.js';
 import { runScheduledWorker } from '../../../workers/submission-worker/src/scheduled.js';
 
 const app = express();
@@ -18,5 +20,24 @@ app.get('/api/internal/process', async (req, res, next) => {
     next(error);
   }
 });
-app.use(createApp());
+app.use(
+  createApp({
+    dispatchJob(jobId) {
+      const work = dispatch(jobId)
+        .then(async () => {
+          if (usesMongoQueue()) await runScheduledWorker(jobId);
+        })
+        .catch((error) => {
+          logger.error(
+            { jobId, error: error instanceof Error ? error.message : 'Unknown failure' },
+            'Background submission processing failed',
+          );
+        });
+      // Register synchronously while the HTTP request is active. A detached
+      // promise alone can be frozen as soon as Vercel sends the response.
+      waitUntil(work);
+      return work;
+    },
+  }),
+);
 export default app;

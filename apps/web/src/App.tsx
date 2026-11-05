@@ -100,7 +100,24 @@ function ExcelMacroHelp() {
     <div className="notice" role="note">
       <FileSpreadsheet size={20} />
       <div>
-        <strong>Excel multi-select needs macros in desktop Excel.</strong>
+        <strong>Set up multi-select once, then use normal .xlsx downloads.</strong>
+        <p>
+          Download the FormFlow Excel add-in and keep it in a permanent folder. If Windows blocks
+          that add-in, unblock this trusted file once in Properties. In desktop Excel: File →
+          Options → Add-ins → Manage Excel Add-ins → Go → Browse, select FormFlowMultiSelect.xlam
+          and tick it.
+        </p>
+        <DownloadButton
+          path="/excel/addin"
+          name="FormFlowMultiSelect.xlam"
+          label="Download Excel add-in (one-time setup)"
+        />
+        <p>
+          After setup, choose “Add-in .xlsx” on the form page. Response downloads then contain no
+          macros; the installed add-in supplies the multi-select menu. Excel may still show
+          Protected View for website downloads; allow editing if you trust the file. Organization
+          policy may require your administrator.
+        </p>
         <p>
           If a downloaded .xlsm shows a red “Security Risk” banner, its macros are blocked. Only if
           you trust this FormFlow file: close it, right-click the saved file in File Explorer →
@@ -1039,6 +1056,14 @@ export function FormDetail() {
   });
   const toast = useToast();
   const router = useRouter();
+  const [templateMode, setTemplateMode] = useState<'embedded' | 'addin'>('embedded');
+  useEffect(() => {
+    try {
+      if (localStorage.getItem('formflow-excel-mode') === 'addin') setTemplateMode('addin');
+    } catch {
+      /* Storage may be unavailable. */
+    }
+  }, []);
   const reanalyze = useMutation({
     mutationFn: async () => {
       if (!form.data) throw new Error('Wait for the form to load.');
@@ -1053,10 +1078,13 @@ export function FormDetail() {
     onError: (error) => toast(errorMessage(error)),
   });
   const m = useMutation({
-    mutationFn: () => download(`/forms/${id}/template`, 'formflow-template.xlsx'),
+    mutationFn: () =>
+      download(`/forms/${id}/template?mode=${templateMode}`, 'formflow-template.xlsx'),
     onSuccess: (templateId) => {
       toast(
-        'Template downloaded. For multi-select, review the Excel macro instructions on the upload page.',
+        templateMode === 'addin'
+          ? 'XLSX downloaded. Multi-select uses your installed FormFlow add-in.'
+          : 'Template downloaded. For multi-select, review the Excel macro instructions on the upload page.',
       );
       router.push(`/upload?template=${templateId}`);
     },
@@ -1073,6 +1101,23 @@ export function FormDetail() {
         description={definition.description}
         action={
           <div className="flex flex-wrap gap-2">
+            <select
+              aria-label="Excel template format"
+              value={templateMode}
+              disabled={m.isPending}
+              onChange={(event) => {
+                const mode = event.target.value === 'addin' ? 'addin' : 'embedded';
+                setTemplateMode(mode);
+                try {
+                  localStorage.setItem('formflow-excel-mode', mode);
+                } catch {
+                  /* Keep the current selection. */
+                }
+              }}
+            >
+              <option value="embedded">Standalone .xlsm</option>
+              <option value="addin">Add-in .xlsx (after setup)</option>
+            </select>
             {definition.source === 'PUBLIC' && (
               <button
                 className="btn secondary"
@@ -1618,7 +1663,7 @@ export function JobDetail() {
           <Status value={job.data.status} />
           <span>
             <Clock3 size={15} />
-            Started {new Date(job.data.createdAt).toLocaleString()}
+            Created {new Date(job.data.createdAt).toLocaleString()}
           </span>
         </div>
         <div className="progress-counts">

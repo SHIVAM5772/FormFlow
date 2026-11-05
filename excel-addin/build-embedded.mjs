@@ -4,9 +4,12 @@ import fs from 'node:fs/promises';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import CFB from 'cfb';
+import ExcelJS from 'exceljs';
+import JSZip from 'jszip';
 import { compress, decompress } from './ovba.mjs';
 
 const root = new URL('./', import.meta.url);
+const addin = process.argv.includes('--addin');
 const baseBytes = await fs.readFile(new URL('vba-base.bin', root));
 assert.equal(
   createHash('sha256').update(baseBytes).digest('hex'),
@@ -57,18 +60,35 @@ const prefix = Buffer.from(dir.subarray(0, moduleStart + 16));
 prefix.writeUInt16LE(kept.length, moduleStart + 6);
 const newDir = Buffer.concat([prefix, ...kept.map((r) => r.bytes), dir.subarray(pos)]);
 
-const workbookSource = await fs.readFile(new URL('src/ThisWorkbook.cls', root), 'utf8');
-const moduleSource = (await fs.readFile(new URL('src/FormFlowMultiSelect.bas', root), 'utf8'))
-  .replace('Attribute VB_Name = "FormFlowMultiSelect"', 'Attribute VB_Name = "Module1"')
+let workbookSource = await fs.readFile(new URL('src/ThisWorkbook.cls', root), 'utf8');
+const originalModule = (
+  await fs.readFile(new URL('src/FormFlowMultiSelect.bas', root), 'utf8')
+).replace('Attribute VB_Name = "FormFlowMultiSelect"', 'Attribute VB_Name = "Module1"');
+let moduleSource = originalModule
   .replace(/^Private hooks As CFormFlowEvents\r?\n/m, '')
   .replace(/^    Set hooks = Nothing\r?\n/m, '')
   .replace(/^    Set hooks = New CFormFlowEvents\r?\n/m, '')
-  .replace(/^    Set hooks.App = Application\r?\n/m, '')
-  .replace(
-    'If cell Is Nothing Then Exit Function',
-    'If cell Is Nothing Then Exit Function\n    If Not (cell.Worksheet.Parent Is ThisWorkbook) Then Exit Function',
-  );
+  .replace(/^    Set hooks.App = Application\r?\n/m, '');
+moduleSource = addin
+  ? moduleSource.replace(
+      'Public Sub FormFlowEnable()',
+      'Public Sub FormFlowEnable()\n    Set ThisWorkbook.App = Application',
+    )
+  : moduleSource.replace(
+      'If cell Is Nothing Then Exit Function',
+      'If cell Is Nothing Then Exit Function\n    If Not (cell.Worksheet.Parent Is ThisWorkbook) Then Exit Function',
+    );
 const sources = { ThisWorkbook: workbookSource, Module1: moduleSource };
+if (addin) {
+  // Global event hooks live in the add-in, never in downloaded response files.
+  const eventSource = await fs.readFile(new URL('src/CFormFlowEvents.cls', root), 'utf8');
+  workbookSource =
+    workbookSource.slice(0, workbookSource.indexOf('Option Explicit')) +
+    `Option Explicit\n` +
+    eventSource.slice(eventSource.indexOf('Public WithEvents')) +
+    `\nPrivate Sub Workbook_Open()\n    FormFlowEnable\nEnd Sub\nPrivate Sub Workbook_AddinInstall()\n    FormFlowEnable\nEnd Sub\n`;
+  sources.ThisWorkbook = workbookSource;
+}
 for (const name of ['Sheet1', 'Sheet2', 'Sheet3', 'Sheet4']) {
   sources[name] =
     `Attribute VB_Name = "${name}"\nAttribute VB_Base = "0{00020820-0000-0000-C000-000000000046}"\nAttribute VB_GlobalNameSpace = False\nAttribute VB_Creatable = False\nAttribute VB_PredeclaredId = True\nAttribute VB_Exposed = True\nOption Explicit\n`;
@@ -104,7 +124,64 @@ CFB.utils.cfb_add(
     Buffer.from([0, 0]),
   ]),
 );
-const out = new URL('../packages/excel-engine/assets/vbaProject.bin', root);
+const out = new URL(
+  `../packages/excel-engine/assets/${addin ? 'FormFlowMultiSelect.xlam' : 'vbaProject.bin'}`,
+  root,
+);
 await fs.mkdir(new URL('../packages/excel-engine/assets/', root), { recursive: true });
-await fs.writeFile(out, CFB.write(result, { type: 'buffer' }));
-console.log(`Embedded multi-select VBA built: ${out.pathname}`);
+let bytes = CFB.write(result, { type: 'buffer' });
+if (addin) {
+  const book = new ExcelJS.Workbook();
+  book.creator = 'FormFlow Automation';
+  for (const name of ['FormFlow', 'Validation Reference', 'Instructions', 'Field Mapping'])
+    book.addWorksheet(name);
+  book
+    .getWorksheet('FormFlow')
+    .addRow(['FormFlow multi-select add-in', 'Multi-select for FormFlow .xlsx templates.']);
+  book
+    .getWorksheet('Instructions')
+    .addRow(['License', await fs.readFile(new URL('VBA-BASE-LICENSE.txt', root), 'utf8')]);
+  const zip = await JSZip.loadAsync(await book.xlsx.writeBuffer());
+  zip.file('xl/vbaProject.bin', bytes);
+  const types = await zip.file('[Content_Types].xml').async('string');
+  zip.file(
+    '[Content_Types].xml',
+    types
+      .replace(
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet.main+xml',
+        'application/vnd.ms-excel.addin.macroEnabled.main+xml',
+      )
+      .replace(
+        '</Types>',
+        '<Override PartName="/xl/vbaProject.bin" ContentType="application/vnd.ms-office.vbaProject"/></Types>',
+      ),
+  );
+  const rels = await zip.file('xl/_rels/workbook.xml.rels').async('string');
+  zip.file(
+    'xl/_rels/workbook.xml.rels',
+    rels.replace(
+      '</Relationships>',
+      '<Relationship Id="rIdFormFlowVba" Type="http://schemas.microsoft.com/office/2006/relationships/vbaProject" Target="vbaProject.bin"/></Relationships>',
+    ),
+  );
+  const xml = await zip.file('xl/workbook.xml').async('string');
+  zip.file(
+    'xl/workbook.xml',
+    xml
+      .replace('<workbookPr', '<workbookPr codeName="ThisWorkbook"')
+      .replace('filterPrivacy="1"', 'filterPrivacy="0"'),
+  );
+  for (let i = 1; i <= 4; i++) {
+    const path = `xl/worksheets/sheet${i}.xml`;
+    const sheet = await zip.file(path).async('string');
+    zip.file(
+      path,
+      sheet.includes('<sheetPr')
+        ? sheet.replace('<sheetPr', `<sheetPr codeName="Sheet${i}"`)
+        : sheet.replace('<dimension', `<sheetPr codeName="Sheet${i}"/><dimension`),
+    );
+  }
+  bytes = await zip.generateAsync({ type: 'nodebuffer', compression: 'DEFLATE' });
+}
+await fs.writeFile(out, bytes);
+console.log(`Multi-select ${addin ? 'add-in' : 'embedded VBA'} built: ${out.pathname}`);

@@ -15,6 +15,7 @@ import { FormAnalyzer } from '../../../packages/form-analyzer/src/index.js';
 import {
   generateTemplate,
   templateFileType,
+  excelAddin,
   parseUpload,
   reportWorkbook,
 } from '../../../packages/excel-engine/src/index.js';
@@ -101,7 +102,9 @@ const upload = multer({
   },
 });
 let analyzing = 0;
-export function createApp() {
+export function createApp({
+  dispatchJob = dispatch,
+}: { dispatchJob?: (jobId: string) => Promise<void> } = {}) {
   const app = express();
   app.disable('x-powered-by');
   if (config.NODE_ENV === 'production') app.set('trust proxy', 1);
@@ -365,6 +368,15 @@ export function createApp() {
     }),
   );
   app.get(
+    '/api/excel/addin',
+    asyncRoute(async (_req, res) => {
+      res
+        .type('application/vnd.ms-excel.addin.macroEnabled.12')
+        .attachment('FormFlowMultiSelect.xlam')
+        .send(await excelAddin());
+    }),
+  );
+  app.get(
     '/api/forms/:id/template',
     asyncRoute(async (req, res) => {
       const form = await ownedForm(req.params.id, uid(res));
@@ -375,9 +387,10 @@ export function createApp() {
           409,
           'No questions are available for an Excel template. Resolve form access and reanalyze the form first.',
         );
+      const mode = z.enum(['embedded', 'addin']).default('embedded').parse(req.query.mode);
       const template = await db.excelTemplate.create({ data: { schemaId: schema.id } });
-      const buffer = await generateTemplate(definition, template.id, config.MAX_ROWS);
-      const fileType = templateFileType(definition);
+      const buffer = await generateTemplate(definition, template.id, config.MAX_ROWS, mode);
+      const fileType = templateFileType(definition, mode);
       await audit(uid(res), 'TEMPLATE_GENERATED', template.id);
       res
         .set({
@@ -495,6 +508,10 @@ export function createApp() {
       });
       if (!found) throw new HttpError(404, 'Upload not found');
       if (found.job) {
+        if (['QUEUED', 'RUNNING'].includes(found.job.status))
+          void dispatchJob(found.job.id).catch(() =>
+            logger.warn({ jobId: found.job!.id }, 'Dispatch deferred to reconciler'),
+          );
         res.json({ data: found.job });
         return;
       }
@@ -533,7 +550,7 @@ export function createApp() {
         return created;
       });
       // Committed DB state is recoverable even if Redis is temporarily unavailable.
-      void dispatch(job.id).catch(() =>
+      void dispatchJob(job.id).catch(() =>
         logger.warn({ jobId: job.id }, 'Dispatch deferred to reconciler'),
       );
       res.status(201).json({ data: job });
@@ -590,7 +607,7 @@ export function createApp() {
             where: { id: job.id, status: 'PAUSED' },
             data: { status: 'QUEUED', reason: null },
           });
-          void dispatch(job.id).catch(() => {});
+          void dispatchJob(job.id).catch(() => {});
         }
         await audit(uid(res), `JOB_${action.toUpperCase()}`, job.id);
         res.json({ data: await ownedJob(job.id, uid(res)) });
@@ -634,7 +651,7 @@ export function createApp() {
         if (!queued.count) throw new HttpError(409, 'Job state changed. Refresh before retrying.');
       });
       await audit(uid(res), 'RECORD_RETRY', record.id);
-      void dispatch(job.id).catch(() => {});
+      void dispatchJob(job.id).catch(() => {});
       res.json({ data: { queued: true } });
     }),
   );
@@ -647,6 +664,12 @@ export function createApp() {
         where: { jobId: job.id },
         _count: true,
       });
+      // Polling continues already-authorized batches between bounded serverless
+      // invocations. The Vercel adapter registers this work with waitUntil.
+      if (['QUEUED', 'RUNNING'].includes(job.status))
+        void dispatchJob(job.id).catch(() =>
+          logger.warn({ jobId: job.id }, 'Processing wake-up failed'),
+        );
       res.json({
         data: { ...job, counts: Object.fromEntries(groups.map((g) => [g.status, g._count])) },
       });

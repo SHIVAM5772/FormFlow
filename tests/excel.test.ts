@@ -15,6 +15,32 @@ import {
 import { columns, questionSchema } from '../packages/shared/src/index.js';
 import { normalizeGoogleApi, normalizePublic } from '../packages/form-analyzer/src/normalize.js';
 const templateId = '7926ad27-2a8b-487a-adf1-010723b037a3';
+it('exports macro-free add-in templates with the same choice markers and upload mapping', async () => {
+  const form = sampleForm();
+  expect(templateFileType(form, 'addin').extension).toBe('xlsx');
+  const buffer = await generateTemplate(form, templateId, 10, 'addin');
+  const zip = await JSZip.loadAsync(buffer);
+  expect(zip.file('xl/vbaProject.bin')).toBeNull();
+  expect(await zip.file('[Content_Types].xml')!.async('string')).not.toContain('macroEnabled');
+  expect(() => inspectZip(buffer)).not.toThrow();
+  const book = new ExcelJS.Workbook();
+  await book.xlsx.load(buffer as any);
+  const sheet = book.getWorksheet('Responses')!;
+  expect(sheet.getCell('E2').dataValidation.formulae![0]).toMatch(/^FormFlowMulti_/);
+  expect(sheet.getCell('E2').dataValidation.prompt).toContain('add-in installed');
+  expect(sheet.getCell('C2').dataValidation.showErrorMessage).toBe(true);
+  sheet.getRow(2).values = columns(form).map(
+    (c) => sampleAnswers[c.key as keyof typeof sampleAnswers],
+  );
+  const parsed = await parseUpload(
+    Buffer.from(await book.xlsx.writeBuffer()),
+    form,
+    templateId,
+    10,
+  );
+  expect(parsed.valid).toBe(1);
+  expect(parsed.rows[0].answers.skills).toBe('TypeScript; Excel');
+});
 it('exports and imports an untitled checkbox without a false form blocker', async () => {
   const form = normalizePublic(
     [
